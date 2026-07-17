@@ -139,7 +139,9 @@ async function processGenerateScript(admin: SupabaseClient, projectId: string) {
     targetDurationMinutes: project.target_duration_minutes,
     language: project.script_language === "en" ? "en" : "es",
     onProgress: ({ attempt, maxAttempts }) => {
-      void setProgress(admin, projectId, "continuing_script", attempt, maxAttempts);
+      setProgress(admin, projectId, "continuing_script", attempt, maxAttempts).catch(
+        (err) => console.error("[worker] no se pudo guardar el progreso:", err),
+      );
     },
   });
 
@@ -431,13 +433,13 @@ async function processAssembly(admin: SupabaseClient, projectId: string) {
   const finalVideoBytes = await assembleSegmentsToVideo(assets, {
     subtitlesEnabled: project?.subtitles_enabled === true,
     onProgress: (progress) => {
-      void setProgress(
+      setProgress(
         admin,
         projectId,
         progress.step,
         progress.current,
         progress.total,
-      );
+      ).catch((err) => console.error("[worker] no se pudo guardar el progreso:", err));
     },
   });
 

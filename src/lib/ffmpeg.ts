@@ -1,6 +1,6 @@
 import "server-only";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { cpus, tmpdir } from "node:os";
 import path from "node:path";
 import type { SegmentAnimation, SegmentTransition } from "./types";
@@ -33,16 +33,22 @@ export type SegmentAsset = {
 
 export type AssembleProgress =
   | { step: "clips"; current: number; total: number }
-  | { step: "encoding"; current: number; total: number }
-  | { step: "compressing"; current: number; total: number };
+  | { step: "encoding"; current: number; total: number };
 
-// Si el video final pesa más que esto, se recomprime a un bitrate menor
-// (mismo criterio que el umbral de Storage) para que ocupe mucho menos
-// espacio, en vez de subir un archivo pesado sin necesidad.
-const COMPRESS_THRESHOLD_BYTES = 50 * 1024 * 1024;
-const COMPRESS_TARGET_BYTES = 35 * 1024 * 1024;
-const COMPRESS_AUDIO_BITRATE_KBPS = 128;
-const COMPRESS_MIN_VIDEO_BITRATE_KBPS = 300;
+// Si un video "pesado" (crf libre, sin límite de bitrate) probablemente
+// pesaría más que esto, se codifica directo con un bitrate acotado
+// apuntando al tamaño objetivo, en la MISMA (única) pasada de encoding —
+// nada de encodear una vez y después recomprimir con un segundo pase
+// completo (eso duplicaba el tiempo de armado en videos largos, que es
+// justo el caso que más lo necesita).
+const HEAVY_THRESHOLD_BYTES = 50 * 1024 * 1024;
+const COMPRESSED_TARGET_BYTES = 35 * 1024 * 1024;
+const COMPRESSED_AUDIO_BITRATE_KBPS = 128;
+const MIN_VIDEO_BITRATE_KBPS = 300;
+// Estimación conservadora de a cuánto bitrate promedio termina un encode a
+// crf23/720p con harto movimiento (zoompan en casi todos los segmentos) —
+// no hace falta que sea exacta, solo definir cuándo conviene acotar.
+const ESTIMATED_UNCAPPED_BITRATE_BPS = 3_500_000;
 
 export type AssembleOptions = {
   subtitlesEnabled?: boolean;
@@ -462,6 +468,31 @@ export async function assembleSegmentsToVideo(
     for (const clipPath of clipPaths) inputArgs.push("-i", clipPath);
     for (const audioPath of audioPaths) inputArgs.push("-i", audioPath);
 
+    // Si a bitrate libre (crf) probablemente pesaría más que el umbral,
+    // se acota el bitrate desde esta misma pasada apuntando al tamaño
+    // objetivo — un solo encoding completo, nunca dos.
+    const estimatedUncappedBytes =
+      (combinedDuration * ESTIMATED_UNCAPPED_BITRATE_BPS) / 8;
+    const needsBitrateCap = estimatedUncappedBytes > HEAVY_THRESHOLD_BYTES;
+
+    const bitrateArgs: string[] = [];
+    let audioBitrateKbps = 192;
+    if (needsBitrateCap) {
+      const totalBitrateKbps = Math.floor(
+        (COMPRESSED_TARGET_BYTES * 8) / combinedDuration / 1000,
+      );
+      audioBitrateKbps = COMPRESSED_AUDIO_BITRATE_KBPS;
+      const videoBitrateKbps = Math.max(
+        MIN_VIDEO_BITRATE_KBPS,
+        totalBitrateKbps - audioBitrateKbps,
+      );
+      bitrateArgs.push(
+        "-b:v", `${videoBitrateKbps}k`,
+        "-maxrate", `${Math.round(videoBitrateKbps * 1.5)}k`,
+        "-bufsize", `${videoBitrateKbps * 2}k`,
+      );
+    }
+
     options.onProgress?.({ step: "encoding", current: 0, total: 1 });
     const finalPath = path.join(workDir, "final.mp4");
     await runFfmpeg([
@@ -473,52 +504,17 @@ export async function assembleSegmentsToVideo(
       "-r", String(FPS),
       "-c:v", "libx264",
       "-preset", "veryfast",
+      ...bitrateArgs,
       "-threads", String(THREADS),
       "-pix_fmt", "yuv420p",
       "-c:a", "aac",
-      "-b:a", "192k",
+      "-b:a", `${audioBitrateKbps}k`,
       "-ar", "44100",
       finalPath,
     ]);
     options.onProgress?.({ step: "encoding", current: 1, total: 1 });
 
-    const { size } = await stat(finalPath);
-    if (size <= COMPRESS_THRESHOLD_BYTES) {
-      return new Uint8Array(await readFile(finalPath));
-    }
-
-    // Pesa más de lo razonable para subir/almacenar — se recomprime a un
-    // bitrate calculado para acercarse al tamaño objetivo, en vez de subir
-    // el archivo pesado tal cual. Es una segunda pasada liviana (solo
-    // transcodifica, no vuelve a correr zoompan/concat/subtítulos).
-    options.onProgress?.({ step: "compressing", current: 0, total: 1 });
-    const totalBitrateKbps = Math.floor(
-      (COMPRESS_TARGET_BYTES * 8) / combinedDuration / 1000,
-    );
-    const videoBitrateKbps = Math.max(
-      COMPRESS_MIN_VIDEO_BITRATE_KBPS,
-      totalBitrateKbps - COMPRESS_AUDIO_BITRATE_KBPS,
-    );
-
-    const compressedPath = path.join(workDir, "final-compressed.mp4");
-    await runFfmpeg([
-      "-y",
-      "-i", finalPath,
-      "-c:v", "libx264",
-      "-b:v", `${videoBitrateKbps}k`,
-      "-maxrate", `${Math.round(videoBitrateKbps * 1.5)}k`,
-      "-bufsize", `${videoBitrateKbps * 2}k`,
-      "-preset", "medium",
-      "-threads", String(THREADS),
-      "-pix_fmt", "yuv420p",
-      "-c:a", "aac",
-      "-b:a", `${COMPRESS_AUDIO_BITRATE_KBPS}k`,
-      "-movflags", "+faststart",
-      compressedPath,
-    ]);
-    options.onProgress?.({ step: "compressing", current: 1, total: 1 });
-
-    return new Uint8Array(await readFile(compressedPath));
+    return new Uint8Array(await readFile(finalPath));
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
