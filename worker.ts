@@ -153,6 +153,8 @@ async function processGenerateScript(admin: SupabaseClient, projectId: string) {
 type SegmentRow = {
   id: string;
   text: string;
+  image_url: string | null;
+  audio_url: string | null;
 };
 
 async function fetchAndUploadImage(
@@ -224,15 +226,21 @@ async function fetchAndUploadAudio(
 
 // Imagen y audio de un segmento se buscan/generan en paralelo (son APIs
 // externas independientes) en vez de en dos fases secuenciales — reduce a
-// la mitad el tiempo de esta etapa.
+// la mitad el tiempo de esta etapa. Si el segmento ya tiene imagen y/o
+// audio de un intento anterior (job reintentado), no los vuelve a generar
+// — evita gastar de nuevo en las APIs externas y acelera los reintentos.
 async function processSegmentMedia(
   admin: SupabaseClient,
   projectId: string,
   segment: SegmentRow,
 ) {
   const [imageResult, audioResult] = await Promise.allSettled([
-    fetchAndUploadImage(admin, projectId, segment),
-    fetchAndUploadAudio(admin, projectId, segment),
+    segment.image_url
+      ? Promise.resolve()
+      : fetchAndUploadImage(admin, projectId, segment),
+    segment.audio_url
+      ? Promise.resolve()
+      : fetchAndUploadAudio(admin, projectId, segment),
   ]);
 
   if (imageResult.status === "fulfilled" && audioResult.status === "fulfilled") {
@@ -263,7 +271,7 @@ function errorMessage(err: unknown): string {
 async function processGenerateVideo(admin: SupabaseClient, projectId: string) {
   const { data: segments, error } = await admin
     .from("segments")
-    .select("id, text")
+    .select("id, text, image_url, audio_url")
     .eq("project_id", projectId)
     .order("order_index", { ascending: true })
     .returns<SegmentRow[]>();
