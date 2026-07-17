@@ -3,12 +3,8 @@ config({ path: ".env.local" });
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "./src/lib/supabase/admin";
-import {
-  generateScript,
-  segmentScript,
-  generateImageWithOpenAI,
-  buildImagePrompt,
-} from "./src/lib/openai";
+import { generateScript, segmentScript } from "./src/lib/openai";
+import { generateImageWithAI, buildImagePrompt } from "./src/lib/image-generation";
 import {
   searchMedia,
   downloadMedia,
@@ -198,16 +194,14 @@ async function fetchAndUploadImage(
   let bytes: Uint8Array;
   let contentType: string;
   let resultType: "image" | "video";
-  let resultProvider: "pexels" | "pixabay" | "openai";
+  let resultProvider: "pexels" | "pixabay" | "openai" | "gemini";
 
   if (mediaPreference === "ai") {
-    const generated = await generateImageWithOpenAI(
-      buildImagePrompt(segment.text),
-    );
+    const generated = await generateImageWithAI(buildImagePrompt(segment.text));
     bytes = generated.bytes;
     contentType = generated.contentType;
     resultType = "image";
-    resultProvider = "openai";
+    resultProvider = generated.provider;
   } else {
     const keywords = extractKeywords(segment.text);
     const result = await searchMedia(keywords, {

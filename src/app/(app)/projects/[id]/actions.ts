@@ -12,7 +12,7 @@ import {
   extensionFromContentType,
   type MediaType,
 } from "@/lib/stock-media";
-import { generateImageWithOpenAI, buildImagePrompt } from "@/lib/openai";
+import { generateImageWithAI, buildImagePrompt } from "@/lib/image-generation";
 import type {
   MediaPreference,
   SegmentAnimation,
@@ -281,7 +281,7 @@ export async function generateSegmentImageWithAI(
   if (!segment) return { error: "Segmento no encontrado." };
 
   try {
-    const { bytes, contentType } = await generateImageWithOpenAI(
+    const { bytes, contentType, provider } = await generateImageWithAI(
       buildImagePrompt(segment.text),
     );
     const extension = extensionFromContentType(contentType);
@@ -304,7 +304,7 @@ export async function generateSegmentImageWithAI(
       .update({
         image_url: publicUrlData.publicUrl,
         media_type: "image",
-        media_provider: "openai",
+        media_provider: provider,
         status: "pending",
       })
       .eq("id", segmentId);

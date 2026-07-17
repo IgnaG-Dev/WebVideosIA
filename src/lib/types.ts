@@ -41,7 +41,7 @@ export type Segment = {
   estimated_duration_seconds: number;
   image_url: string | null;
   media_type: "image" | "video" | null;
-  media_provider: "pexels" | "pixabay" | "openai" | null;
+  media_provider: "pexels" | "pixabay" | "openai" | "gemini" | null;
   audio_url: string | null;
   animation: SegmentAnimation;
   transition: SegmentTransition;

@@ -5,7 +5,7 @@ const SEARCH_TIMEOUT_MS = 20000;
 const DOWNLOAD_TIMEOUT_MS = 30000;
 
 export type MediaType = "image" | "video";
-export type MediaProvider = "pexels" | "pixabay" | "openai";
+export type MediaProvider = "pexels" | "pixabay" | "openai" | "gemini";
 
 export type StockMediaResult = {
   url: string;
