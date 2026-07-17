@@ -205,3 +205,33 @@ ${fullScript}
 
   return segments;
 }
+
+const IMAGE_MODEL = "gpt-image-1";
+
+/**
+ * Genera una imagen con IA (OpenAI) a partir de un prompt de texto. Pensado
+ * como una opción más (junto a Pexels/Pixabay) para el contenido visual de
+ * un segmento — ver lib/stock-media.ts para la búsqueda en bancos de stock.
+ */
+export async function generateImageWithOpenAI(
+  prompt: string,
+): Promise<{ bytes: Uint8Array; contentType: string }> {
+  const result = await getClient().images.generate({
+    model: IMAGE_MODEL,
+    prompt,
+    size: "1536x1024",
+    n: 1,
+  });
+
+  const b64 = result.data?.[0]?.b64_json;
+  if (!b64) {
+    throw new Error("La IA no devolvió ninguna imagen.");
+  }
+
+  return { bytes: Uint8Array.from(Buffer.from(b64, "base64")), contentType: "image/png" };
+}
+
+/** Arma un prompt de imagen a partir del texto narrado de un segmento. */
+export function buildImagePrompt(segmentText: string): string {
+  return `Imagen fotorrealista, formato horizontal panorámico, que ilustre visualmente la siguiente idea (sin texto ni letras en la imagen): ${segmentText}`;
+}

@@ -28,7 +28,7 @@ export async function createProject(
   );
   const mediaPreferenceRaw = String(formData.get("media_preference") ?? "");
   const mediaPreference: MediaPreference =
-    mediaPreferenceRaw === "video" || mediaPreferenceRaw === "gemini"
+    mediaPreferenceRaw === "video" || mediaPreferenceRaw === "ai"
       ? mediaPreferenceRaw
       : "image";
   const subtitlesEnabled = formData.get("subtitles_enabled") === "on";

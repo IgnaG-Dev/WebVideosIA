@@ -48,9 +48,9 @@ export function MediaPreferenceSelector({
         <input
           type="radio"
           name="media_preference_select"
-          checked={mediaPreference === "gemini"}
+          checked={mediaPreference === "ai"}
           disabled={isPending}
-          onChange={() => handleChange("gemini")}
+          onChange={() => handleChange("ai")}
         />
         Generar con IA
       </label>

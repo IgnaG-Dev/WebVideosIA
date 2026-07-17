@@ -3,14 +3,18 @@ config({ path: ".env.local" });
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "./src/lib/supabase/admin";
-import { generateScript, segmentScript } from "./src/lib/openai";
+import {
+  generateScript,
+  segmentScript,
+  generateImageWithOpenAI,
+  buildImagePrompt,
+} from "./src/lib/openai";
 import {
   searchMedia,
   downloadMedia,
   extractKeywords,
   extensionFromContentType,
 } from "./src/lib/stock-media";
-import { generateImageWithGemini, buildImagePrompt } from "./src/lib/gemini";
 import { synthesizeSpeech } from "./src/lib/tts";
 import {
   assembleSegmentsToVideo,
@@ -194,16 +198,16 @@ async function fetchAndUploadImage(
   let bytes: Uint8Array;
   let contentType: string;
   let resultType: "image" | "video";
-  let resultProvider: "pexels" | "pixabay" | "gemini";
+  let resultProvider: "pexels" | "pixabay" | "openai";
 
-  if (mediaPreference === "gemini") {
-    const generated = await generateImageWithGemini(
+  if (mediaPreference === "ai") {
+    const generated = await generateImageWithOpenAI(
       buildImagePrompt(segment.text),
     );
     bytes = generated.bytes;
     contentType = generated.contentType;
     resultType = "image";
-    resultProvider = "gemini";
+    resultProvider = "openai";
   } else {
     const keywords = extractKeywords(segment.text);
     const result = await searchMedia(keywords, {
@@ -334,7 +338,7 @@ async function processGenerateVideo(admin: SupabaseClient, projectId: string) {
     .eq("id", projectId)
     .single();
   const mediaPreference: MediaPreference =
-    project?.media_preference === "video" || project?.media_preference === "gemini"
+    project?.media_preference === "video" || project?.media_preference === "ai"
       ? project.media_preference
       : "image";
 

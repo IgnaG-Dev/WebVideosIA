@@ -2,7 +2,7 @@ export type ScriptMode = "manual" | "ia";
 
 export type ScriptLanguage = "es" | "en";
 
-export type MediaPreference = "image" | "video" | "gemini";
+export type MediaPreference = "image" | "video" | "ai";
 
 export type SegmentAnimation =
   | "none"
@@ -41,7 +41,7 @@ export type Segment = {
   estimated_duration_seconds: number;
   image_url: string | null;
   media_type: "image" | "video" | null;
-  media_provider: "pexels" | "pixabay" | "gemini" | null;
+  media_provider: "pexels" | "pixabay" | "openai" | null;
   audio_url: string | null;
   animation: SegmentAnimation;
   transition: SegmentTransition;

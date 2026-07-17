@@ -82,7 +82,7 @@ export default function NewProjectPage() {
               Videos
             </label>
             <label className="flex items-center gap-2">
-              <input type="radio" name="media_preference" value="gemini" />
+              <input type="radio" name="media_preference" value="ai" />
               Generar con IA
             </label>
           </div>

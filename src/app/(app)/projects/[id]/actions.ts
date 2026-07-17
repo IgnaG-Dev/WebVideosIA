@@ -12,7 +12,7 @@ import {
   extensionFromContentType,
   type MediaType,
 } from "@/lib/stock-media";
-import { generateImageWithGemini, buildImagePrompt } from "@/lib/gemini";
+import { generateImageWithOpenAI, buildImagePrompt } from "@/lib/openai";
 import type {
   MediaPreference,
   SegmentAnimation,
@@ -262,8 +262,8 @@ export async function replaceSegmentImage(
   }
 }
 
-/** Genera una imagen con Gemini para este segmento a partir de su texto. */
-export async function generateSegmentImageWithGemini(
+/** Genera una imagen con IA (OpenAI) para este segmento a partir de su texto. */
+export async function generateSegmentImageWithAI(
   projectId: string,
   segmentId: string,
 ): Promise<ReplaceImageState> {
@@ -281,7 +281,7 @@ export async function generateSegmentImageWithGemini(
   if (!segment) return { error: "Segmento no encontrado." };
 
   try {
-    const { bytes, contentType } = await generateImageWithGemini(
+    const { bytes, contentType } = await generateImageWithOpenAI(
       buildImagePrompt(segment.text),
     );
     const extension = extensionFromContentType(contentType);
@@ -304,7 +304,7 @@ export async function generateSegmentImageWithGemini(
       .update({
         image_url: publicUrlData.publicUrl,
         media_type: "image",
-        media_provider: "gemini",
+        media_provider: "openai",
         status: "pending",
       })
       .eq("id", segmentId);

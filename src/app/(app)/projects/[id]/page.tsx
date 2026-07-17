@@ -54,7 +54,7 @@ export default async function ProjectDetailPage({
           <dd>
             {project.media_preference === "video"
               ? "Videos"
-              : project.media_preference === "gemini"
+              : project.media_preference === "ai"
                 ? "Generado con IA"
                 : "Imágenes"}
           </dd>

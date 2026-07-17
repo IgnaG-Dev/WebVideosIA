@@ -5,7 +5,7 @@ const SEARCH_TIMEOUT_MS = 20000;
 const DOWNLOAD_TIMEOUT_MS = 30000;
 
 export type MediaType = "image" | "video";
-export type MediaProvider = "pexels" | "pixabay" | "gemini";
+export type MediaProvider = "pexels" | "pixabay" | "openai";
 
 export type StockMediaResult = {
   url: string;
@@ -117,11 +117,11 @@ const pixabaySource: StockMediaSource = {
   },
 };
 
-// La generación de imágenes con Gemini vive en lib/gemini.ts, aparte: no es
-// una búsqueda por keywords como Pexels/Pixabay sino generativa a partir de
-// un prompt, así que no comparte la interfaz StockMediaSource. El worker
-// decide entre este módulo y lib/gemini.ts según projects.media_preference.
-// Reservado para una fase futura: generación de VIDEO con Gemini (Veo).
+// La generación de imágenes con IA (OpenAI) vive en lib/openai.ts, aparte:
+// no es una búsqueda por keywords como Pexels/Pixabay sino generativa a
+// partir de un prompt, así que no comparte la interfaz StockMediaSource. El
+// worker decide entre este módulo y lib/openai.ts según
+// projects.media_preference.
 
 const SOURCES: StockMediaSource[] = [pexelsSource, pixabaySource];
 
