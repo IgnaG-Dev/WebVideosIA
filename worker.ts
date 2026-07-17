@@ -9,14 +9,19 @@ import {
   downloadMedia,
   extractKeywords,
   extensionFromContentType,
-  type MediaType,
 } from "./src/lib/stock-media";
+import { generateImageWithGemini, buildImagePrompt } from "./src/lib/gemini";
 import { synthesizeSpeech } from "./src/lib/tts";
 import {
   assembleSegmentsToVideo,
   getAudioDurationSeconds,
   type SegmentAsset,
 } from "./src/lib/ffmpeg";
+import type {
+  MediaPreference,
+  SegmentAnimation,
+  SegmentTransition,
+} from "./src/lib/types";
 
 const POLL_INTERVAL_MS = 5000;
 const SEGMENT_CONCURRENCY = 3;
@@ -139,17 +144,38 @@ async function fetchAndUploadImage(
   admin: SupabaseClient,
   projectId: string,
   segment: SegmentRow,
-  preferredType: MediaType,
+  mediaPreference: MediaPreference,
 ) {
-  const keywords = extractKeywords(segment.text);
-  const result = await searchMedia(keywords, { preferredType });
-  if (!result) {
-    throw new Error(
-      `No se encontró imagen/video para las palabras clave: "${keywords}".`,
+  let bytes: Uint8Array;
+  let contentType: string;
+  let resultType: "image" | "video";
+  let resultProvider: "pexels" | "pixabay" | "gemini";
+
+  if (mediaPreference === "gemini") {
+    const generated = await generateImageWithGemini(
+      buildImagePrompt(segment.text),
     );
+    bytes = generated.bytes;
+    contentType = generated.contentType;
+    resultType = "image";
+    resultProvider = "gemini";
+  } else {
+    const keywords = extractKeywords(segment.text);
+    const result = await searchMedia(keywords, {
+      preferredType: mediaPreference,
+    });
+    if (!result) {
+      throw new Error(
+        `No se encontró imagen/video para las palabras clave: "${keywords}".`,
+      );
+    }
+    const downloaded = await downloadMedia(result.url);
+    bytes = downloaded.bytes;
+    contentType = downloaded.contentType;
+    resultType = result.type;
+    resultProvider = result.provider;
   }
 
-  const { bytes, contentType } = await downloadMedia(result.url);
   const extension = extensionFromContentType(contentType);
   const path = `${projectId}/segments/${segment.id}/image.${extension}`;
 
@@ -170,8 +196,8 @@ async function fetchAndUploadImage(
     .from("segments")
     .update({
       image_url: publicUrlData.publicUrl,
-      media_type: result.type,
-      media_provider: result.provider,
+      media_type: resultType,
+      media_provider: resultProvider,
     })
     .eq("id", segment.id);
 }
@@ -220,12 +246,12 @@ async function processSegmentMedia(
   admin: SupabaseClient,
   projectId: string,
   segment: SegmentRow,
-  preferredType: MediaType,
+  mediaPreference: MediaPreference,
 ) {
   const [imageResult, audioResult] = await Promise.allSettled([
     segment.image_url
       ? Promise.resolve()
-      : fetchAndUploadImage(admin, projectId, segment, preferredType),
+      : fetchAndUploadImage(admin, projectId, segment, mediaPreference),
     segment.audio_url
       ? Promise.resolve()
       : fetchAndUploadAudio(admin, projectId, segment),
@@ -262,8 +288,10 @@ async function processGenerateVideo(admin: SupabaseClient, projectId: string) {
     .select("media_preference")
     .eq("id", projectId)
     .single();
-  const preferredType: MediaType =
-    project?.media_preference === "video" ? "video" : "image";
+  const mediaPreference: MediaPreference =
+    project?.media_preference === "video" || project?.media_preference === "gemini"
+      ? project.media_preference
+      : "image";
 
   const { data: segments, error } = await admin
     .from("segments")
@@ -281,7 +309,7 @@ async function processGenerateVideo(admin: SupabaseClient, projectId: string) {
     .update({ status: "generating_images" })
     .eq("id", projectId);
   await mapWithConcurrency(segments, SEGMENT_CONCURRENCY, (segment) =>
-    processSegmentMedia(admin, projectId, segment, preferredType),
+    processSegmentMedia(admin, projectId, segment, mediaPreference),
   );
 
   const { data: finalSegments } = await admin
@@ -308,12 +336,14 @@ type AssemblySegmentRow = {
   media_type: "image" | "video" | null;
   image_url: string | null;
   audio_url: string | null;
+  animation: SegmentAnimation;
+  transition: SegmentTransition;
 };
 
 async function processAssembly(admin: SupabaseClient, projectId: string) {
   const { data: segments, error } = await admin
     .from("segments")
-    .select("order_index, media_type, image_url, audio_url")
+    .select("order_index, media_type, image_url, audio_url, animation, transition")
     .eq("project_id", projectId)
     .order("order_index", { ascending: true })
     .returns<AssemblySegmentRow[]>();
@@ -340,6 +370,8 @@ async function processAssembly(admin: SupabaseClient, projectId: string) {
         mediaBytes: media.bytes,
         mediaExtension: extensionFromContentType(media.contentType),
         audioBytes: audio.bytes,
+        animation: segment.animation,
+        transition: segment.transition,
       };
     },
   );

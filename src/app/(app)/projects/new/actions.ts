@@ -26,9 +26,10 @@ export async function createProject(
   const targetDurationMinutes = Number(
     formData.get("target_duration_minutes"),
   );
+  const mediaPreferenceRaw = String(formData.get("media_preference") ?? "");
   const mediaPreference: MediaPreference =
-    String(formData.get("media_preference") ?? "") === "video"
-      ? "video"
+    mediaPreferenceRaw === "video" || mediaPreferenceRaw === "gemini"
+      ? mediaPreferenceRaw
       : "image";
 
   if (!title) {

@@ -52,7 +52,11 @@ export default async function ProjectDetailPage({
         <div>
           <dt className="text-foreground/60">Contenido visual</dt>
           <dd>
-            {project.media_preference === "video" ? "Videos" : "Imágenes"}
+            {project.media_preference === "video"
+              ? "Videos"
+              : project.media_preference === "gemini"
+                ? "Generado con IA (Gemini)"
+                : "Imágenes"}
           </dd>
         </div>
         <div>

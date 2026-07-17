@@ -12,7 +12,12 @@ import {
   extensionFromContentType,
   type MediaType,
 } from "@/lib/stock-media";
-import type { MediaPreference } from "@/lib/types";
+import { generateImageWithGemini, buildImagePrompt } from "@/lib/gemini";
+import type {
+  MediaPreference,
+  SegmentAnimation,
+  SegmentTransition,
+} from "@/lib/types";
 
 const ASSETS_BUCKET = "project-assets";
 
@@ -257,6 +262,63 @@ export async function replaceSegmentImage(
   }
 }
 
+/** Genera una imagen con Gemini para este segmento a partir de su texto. */
+export async function generateSegmentImageWithGemini(
+  projectId: string,
+  segmentId: string,
+): Promise<ReplaceImageState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: segment } = await supabase
+    .from("segments")
+    .select("text")
+    .eq("id", segmentId)
+    .maybeSingle();
+  if (!segment) return { error: "Segmento no encontrado." };
+
+  try {
+    const { bytes, contentType } = await generateImageWithGemini(
+      buildImagePrompt(segment.text),
+    );
+    const extension = extensionFromContentType(contentType);
+    const admin = createAdminClient();
+    const storagePath = `${projectId}/segments/${segmentId}/image-${Date.now()}.${extension}`;
+
+    const { error: uploadError } = await admin.storage
+      .from(ASSETS_BUCKET)
+      .upload(storagePath, bytes, { contentType, upsert: true });
+    if (uploadError) {
+      return { error: "No se pudo subir la imagen generada." };
+    }
+
+    const { data: publicUrlData } = admin.storage
+      .from(ASSETS_BUCKET)
+      .getPublicUrl(storagePath);
+
+    await supabase
+      .from("segments")
+      .update({
+        image_url: publicUrlData.publicUrl,
+        media_type: "image",
+        media_provider: "gemini",
+        status: "pending",
+      })
+      .eq("id", segmentId);
+
+    await markProjectStaleIfDone(supabase, projectId);
+
+    revalidatePath(`/projects/${projectId}`);
+    return { error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { error: `No se pudo generar la imagen con Gemini: ${message}` };
+  }
+}
+
 /** Sube una imagen propia para reemplazar la de un segmento. */
 export async function uploadSegmentImage(
   projectId: string,
@@ -355,5 +417,75 @@ export async function updateMediaPreference(
     .update({ media_preference: mediaPreference })
     .eq("id", projectId);
 
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function updateSegmentAnimation(
+  projectId: string,
+  segmentId: string,
+  animation: SegmentAnimation,
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  await supabase.from("segments").update({ animation }).eq("id", segmentId);
+  await markProjectStaleIfDone(supabase, projectId);
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function updateSegmentTransition(
+  projectId: string,
+  segmentId: string,
+  transition: SegmentTransition,
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  await supabase.from("segments").update({ transition }).eq("id", segmentId);
+  await markProjectStaleIfDone(supabase, projectId);
+  revalidatePath(`/projects/${projectId}`);
+}
+
+/** Aplica la misma animación a todos los segmentos del proyecto. */
+export async function applyAnimationToAllSegments(
+  projectId: string,
+  animation: SegmentAnimation,
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  await supabase
+    .from("segments")
+    .update({ animation })
+    .eq("project_id", projectId);
+  await markProjectStaleIfDone(supabase, projectId);
+  revalidatePath(`/projects/${projectId}`);
+}
+
+/** Aplica la misma transición a todos los segmentos del proyecto. */
+export async function applyTransitionToAllSegments(
+  projectId: string,
+  transition: SegmentTransition,
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  await supabase
+    .from("segments")
+    .update({ transition })
+    .eq("project_id", projectId);
+  await markProjectStaleIfDone(supabase, projectId);
   revalidatePath(`/projects/${projectId}`);
 }

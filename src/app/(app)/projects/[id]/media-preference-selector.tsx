@@ -44,6 +44,16 @@ export function MediaPreferenceSelector({
         />
         Videos
       </label>
+      <label className="flex items-center gap-1">
+        <input
+          type="radio"
+          name="media_preference_select"
+          checked={mediaPreference === "gemini"}
+          disabled={isPending}
+          onChange={() => handleChange("gemini")}
+        />
+        Generar con IA (Gemini)
+      </label>
     </div>
   );
 }

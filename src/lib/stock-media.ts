@@ -107,12 +107,11 @@ const pixabaySource: StockMediaSource = {
   },
 };
 
-// Reservado para una fase futura: generación de imágenes/video con la API
-// de Gemini (variable GEMINI_API_KEY, todavía no usada). Para sumarla más
-// adelante: implementar acá un StockMediaSource más y agregarlo a SOURCES
-// — el resto del flujo (worker, ffmpeg) no necesita cambios porque solo
-// conoce la forma StockMediaResult { url, type, provider }.
-// const geminiSource: StockMediaSource = { provider: "gemini", ... };
+// La generación de imágenes con Gemini vive en lib/gemini.ts, aparte: no es
+// una búsqueda por keywords como Pexels/Pixabay sino generativa a partir de
+// un prompt, así que no comparte la interfaz StockMediaSource. El worker
+// decide entre este módulo y lib/gemini.ts según projects.media_preference.
+// Reservado para una fase futura: generación de VIDEO con Gemini (Veo).
 
 const SOURCES: StockMediaSource[] = [pexelsSource, pixabaySource];
 

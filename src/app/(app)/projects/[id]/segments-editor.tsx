@@ -2,16 +2,38 @@
 
 import { useRef, useState, useTransition } from "react";
 import type { DragEvent } from "react";
-import type { Segment } from "@/lib/types";
+import type { Segment, SegmentAnimation, SegmentTransition } from "@/lib/types";
 import type { MediaType } from "@/lib/stock-media";
 import {
   updateSegmentsContent,
   reorderSegments,
   replaceSegmentImage,
   uploadSegmentImage,
+  generateSegmentImageWithGemini,
+  updateSegmentAnimation,
+  updateSegmentTransition,
+  applyAnimationToAllSegments,
+  applyTransitionToAllSegments,
 } from "./actions";
 
 type Row = { id: string; text: string; estimated_duration_seconds: number };
+
+const ANIMATION_LABELS: Record<SegmentAnimation, string> = {
+  none: "Sin animación",
+  zoom_in: "Acercar (zoom in)",
+  zoom_out: "Alejar (zoom out)",
+  pan_left: "Paneo a la izquierda",
+  pan_right: "Paneo a la derecha",
+  pan_up: "Paneo hacia arriba",
+  pan_down: "Paneo hacia abajo",
+};
+
+const ANIMATION_OPTIONS = Object.keys(ANIMATION_LABELS) as SegmentAnimation[];
+
+const TRANSITION_LABELS: Record<SegmentTransition, string> = {
+  cut: "Corte directo",
+  crossfade: "Crossfade",
+};
 
 export function SegmentsEditor({
   projectId,
@@ -33,6 +55,8 @@ export function SegmentsEditor({
   const [saved, setSaved] = useState(false);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
+  const [bulkAnimation, setBulkAnimation] = useState<SegmentAnimation>("zoom_in");
+  const [bulkTransition, setBulkTransition] = useState<SegmentTransition>("crossfade");
   const dragIndexRef = useRef<number | null>(null);
 
   // El orden mostrado sigue a la prop (fuente de verdad del servidor) salvo
@@ -108,6 +132,16 @@ export function SegmentsEditor({
     setBusy(segmentId, false);
   }
 
+  async function handleGenerateWithGemini(segmentId: string) {
+    setBusy(segmentId, true);
+    setImageErrors((prev) => ({ ...prev, [segmentId]: "" }));
+    const result = await generateSegmentImageWithGemini(projectId, segmentId);
+    if (result.error) {
+      setImageErrors((prev) => ({ ...prev, [segmentId]: result.error! }));
+    }
+    setBusy(segmentId, false);
+  }
+
   async function handleUploadImage(segmentId: string, file: File) {
     setBusy(segmentId, true);
     setImageErrors((prev) => ({ ...prev, [segmentId]: "" }));
@@ -118,6 +152,30 @@ export function SegmentsEditor({
       setImageErrors((prev) => ({ ...prev, [segmentId]: result.error! }));
     }
     setBusy(segmentId, false);
+  }
+
+  function handleAnimationChange(segmentId: string, animation: SegmentAnimation) {
+    startTransition(async () => {
+      await updateSegmentAnimation(projectId, segmentId, animation);
+    });
+  }
+
+  function handleTransitionChange(segmentId: string, transition: SegmentTransition) {
+    startTransition(async () => {
+      await updateSegmentTransition(projectId, segmentId, transition);
+    });
+  }
+
+  function handleApplyAnimationToAll() {
+    startTransition(async () => {
+      await applyAnimationToAllSegments(projectId, bulkAnimation);
+    });
+  }
+
+  function handleApplyTransitionToAll() {
+    startTransition(async () => {
+      await applyTransitionToAllSegments(projectId, bulkTransition);
+    });
   }
 
   const totalSeconds = rows.reduce(
@@ -137,12 +195,58 @@ export function SegmentsEditor({
         </span>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 rounded-md bg-black/5 px-3 py-2 text-xs">
+        <span className="text-foreground/60">Aplicar a todos:</span>
+        <select
+          value={bulkAnimation}
+          onChange={(e) => setBulkAnimation(e.target.value as SegmentAnimation)}
+          className="rounded border border-black/10 px-1 py-0.5"
+        >
+          {ANIMATION_OPTIONS.map((a) => (
+            <option key={a} value={a}>
+              {ANIMATION_LABELS[a]}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={handleApplyAnimationToAll}
+          disabled={isPending}
+          className="rounded border border-black/10 px-2 py-0.5 disabled:opacity-50"
+        >
+          Aplicar animación
+        </button>
+        <select
+          value={bulkTransition}
+          onChange={(e) => setBulkTransition(e.target.value as SegmentTransition)}
+          className="rounded border border-black/10 px-1 py-0.5"
+        >
+          {(Object.keys(TRANSITION_LABELS) as SegmentTransition[]).map((t) => (
+            <option key={t} value={t}>
+              {TRANSITION_LABELS[t]}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={handleApplyTransitionToAll}
+          disabled={isPending}
+          className="rounded border border-black/10 px-2 py-0.5 disabled:opacity-50"
+        >
+          Aplicar transición
+        </button>
+      </div>
+
       <div className="flex gap-3 overflow-x-auto pb-2">
         {order.map((id, index) => {
           const segment = segmentById.get(id);
           const row = rows.find((r) => r.id === id);
           if (!segment || !row) return null;
           const busy = busyIds.has(id);
+          const previewClass =
+            segment.media_type !== "video" && segment.animation !== "none"
+              ? `kb-preview-${segment.animation}`
+              : "";
 
           return (
             <div
@@ -154,7 +258,7 @@ export function SegmentsEditor({
               onDragEnd={() => {
                 dragIndexRef.current = null;
               }}
-              className="flex w-56 shrink-0 cursor-grab flex-col gap-2 rounded-md border border-black/10 bg-background p-2 active:cursor-grabbing"
+              className="flex w-64 shrink-0 cursor-grab flex-col gap-2 rounded-md border border-black/10 bg-background p-2 active:cursor-grabbing"
             >
               <div className="flex items-center justify-between text-xs text-foreground/50">
                 <span>Segmento {index + 1}</span>
@@ -175,7 +279,7 @@ export function SegmentsEditor({
                     src={segment.image_url}
                     alt=""
                     draggable={false}
-                    className="h-full w-full object-cover"
+                    className={`h-full w-full object-cover ${previewClass}`}
                   />
                 ) : (
                   <span className="text-xs text-foreground/30">
@@ -184,22 +288,30 @@ export function SegmentsEditor({
                 )}
               </div>
 
-              <div className="flex gap-2 text-xs">
+              <div className="grid grid-cols-3 gap-1 text-xs">
                 <button
                   type="button"
                   onClick={() => handleReplaceImage(id, "image")}
                   disabled={busy}
-                  className="flex-1 rounded border border-black/10 py-1 disabled:opacity-50"
+                  className="rounded border border-black/10 py-1 disabled:opacity-50"
                 >
-                  {busy ? "..." : "Otra imagen"}
+                  {busy ? "..." : "Imagen"}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleReplaceImage(id, "video")}
                   disabled={busy}
-                  className="flex-1 rounded border border-black/10 py-1 disabled:opacity-50"
+                  className="rounded border border-black/10 py-1 disabled:opacity-50"
                 >
-                  {busy ? "..." : "Otro video"}
+                  {busy ? "..." : "Video"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleGenerateWithGemini(id)}
+                  disabled={busy}
+                  className="rounded border border-black/10 py-1 disabled:opacity-50"
+                >
+                  {busy ? "..." : "IA"}
                 </button>
               </div>
               <label className="cursor-pointer rounded border border-black/10 py-1 text-center text-xs">
@@ -218,6 +330,45 @@ export function SegmentsEditor({
               </label>
               {imageErrors[id] && (
                 <p className="text-xs text-red-600">{imageErrors[id]}</p>
+              )}
+
+              <label className="flex items-center gap-1 text-xs text-foreground/60">
+                Animación
+                <select
+                  value={segment.animation}
+                  disabled={segment.media_type === "video"}
+                  onChange={(e) =>
+                    handleAnimationChange(id, e.target.value as SegmentAnimation)
+                  }
+                  className="flex-1 rounded border border-black/10 px-1 py-0.5 disabled:opacity-50"
+                >
+                  {ANIMATION_OPTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {ANIMATION_LABELS[a]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {index > 0 && (
+                <label className="flex items-center gap-1 text-xs text-foreground/60">
+                  Entrada
+                  <select
+                    value={segment.transition}
+                    onChange={(e) =>
+                      handleTransitionChange(id, e.target.value as SegmentTransition)
+                    }
+                    className="flex-1 rounded border border-black/10 px-1 py-0.5"
+                  >
+                    {(Object.keys(TRANSITION_LABELS) as SegmentTransition[]).map(
+                      (t) => (
+                        <option key={t} value={t}>
+                          {TRANSITION_LABELS[t]}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </label>
               )}
 
               {segment.audio_url && (

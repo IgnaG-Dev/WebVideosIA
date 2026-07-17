@@ -3,17 +3,29 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { cpus, tmpdir } from "node:os";
 import path from "node:path";
+import type { SegmentAnimation, SegmentTransition } from "./types";
 
 const WIDTH = 1280;
 const HEIGHT = 720;
 const FPS = 25;
 const THREADS = Math.max(1, cpus().length || 2);
 
+// Ken Burns: cuánto llega a acercar/alejar el zoom, y el zoom fijo que usan
+// los paneos (necesitan algo de zoom para tener margen hacia dónde moverse).
+const MAX_ZOOM = 1.3;
+const PAN_ZOOM = 1.15;
+
+const TRANSITION_SECONDS = 0.5;
+
 export type SegmentAsset = {
   mediaType: "image" | "video";
   mediaBytes: Uint8Array;
   mediaExtension: string;
   audioBytes: Uint8Array;
+  animation: SegmentAnimation;
+  // Transición con la que este segmento entra desde el anterior (se ignora
+  // en el primer segmento, no hay nada antes).
+  transition: SegmentTransition;
 };
 
 function runFfmpeg(args: string[]): Promise<void> {
@@ -89,15 +101,70 @@ export async function getAudioDurationSeconds(
 }
 
 /**
- * Arma el video final en un único proceso de ffmpeg, usando el filtro
- * `concat` (no el demuxer + archivos intermedios): cada segmento se
- * decodifica y concatena a nivel de frames dentro del mismo grafo de
- * filtros, y recién ahí se codifica una sola vez. Armar un mp4 por
- * segmento y después concatenarlos (aunque sea re-codificando) arrastra
- * desfasajes de encoder entre archivos que se van acumulando segmento a
- * segmento — con videos de 30-60+ segmentos terminaba notándose la imagen
- * atrasada respecto del audio. Este enfoque no tiene ese problema porque
- * nunca hay un límite de archivo entre un segmento y el siguiente.
+ * Filtro de video para un segmento. Sin animación (o si es un clip de
+ * video, que ya tiene movimiento propio) solo escala/rellena al tamaño de
+ * salida. Con animación, usa zoompan para el efecto Ken Burns.
+ *
+ * Importante: zoompan con `-loop 1` en el input es una trampa clásica —
+ * el `d=` de zoompan solo define cuántos frames dura la RAMPA de zoom,
+ * pero no corta el stream (con un loop infinito, zoompan sigue generando
+ * frames para siempre sosteniendo el zoom final). Y ponerle `-t` al input
+ * en cambio termina multiplicando frames (cada frame del loop dispara su
+ * propio ciclo de zoompan). La forma que sí corta exacto, probada, es un
+ * `trim=duration=` después del zoompan.
+ */
+function buildVideoFilter(
+  animation: SegmentAnimation,
+  mediaType: "image" | "video",
+  durationSeconds: number,
+): string {
+  const baseScale = `scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2`;
+
+  if (mediaType === "video" || animation === "none") {
+    return `${baseScale},setsar=1,fps=${FPS},format=yuv420p`;
+  }
+
+  const frames = Math.max(2, Math.round(durationSeconds * FPS));
+  // Suficiente resolución para que el zoom no pixele sin ser tan grande
+  // como para que zoompan se vuelva insoportablemente lento (8000px de
+  // ancho, probado, tardaba varios minutos por segmento).
+  const upscale = `scale=${WIDTH * 2}:-2`;
+  const centerX = "iw/2-(iw/zoom/2)";
+  const centerY = "ih/2-(ih/zoom/2)";
+  const zoompanTail = `d=${frames}:s=${WIDTH}x${HEIGHT}:fps=${FPS}`;
+  const finishTail = `trim=duration=${durationSeconds.toFixed(3)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p`;
+
+  switch (animation) {
+    case "zoom_in": {
+      const step = ((MAX_ZOOM - 1) / frames).toFixed(6);
+      return `${upscale},zoompan=z='min(zoom+${step},${MAX_ZOOM})':x='${centerX}':y='${centerY}':${zoompanTail},${finishTail}`;
+    }
+    case "zoom_out": {
+      const step = ((MAX_ZOOM - 1) / frames).toFixed(6);
+      return `${upscale},zoompan=z='if(eq(on,1),${MAX_ZOOM},max(zoom-${step},1))':x='${centerX}':y='${centerY}':${zoompanTail},${finishTail}`;
+    }
+    case "pan_left":
+      return `${upscale},zoompan=z=${PAN_ZOOM}:x='(iw-iw/zoom)*(1-(on-1)/${frames - 1})':y='${centerY}':${zoompanTail},${finishTail}`;
+    case "pan_right":
+      return `${upscale},zoompan=z=${PAN_ZOOM}:x='(iw-iw/zoom)*((on-1)/${frames - 1})':y='${centerY}':${zoompanTail},${finishTail}`;
+    case "pan_up":
+      return `${upscale},zoompan=z=${PAN_ZOOM}:x='${centerX}':y='(ih-ih/zoom)*(1-(on-1)/${frames - 1})':${zoompanTail},${finishTail}`;
+    case "pan_down":
+      return `${upscale},zoompan=z=${PAN_ZOOM}:x='${centerX}':y='(ih-ih/zoom)*((on-1)/${frames - 1})':${zoompanTail},${finishTail}`;
+    default:
+      return `${baseScale},setsar=1,fps=${FPS},format=yuv420p`;
+  }
+}
+
+/**
+ * Arma el video final en un único proceso de ffmpeg con el filtro `concat`
+ * (no el demuxer + archivos intermedios — ver historial: concatenar
+ * archivos ya codificados arrastra desfasajes de audio/video que se
+ * acumulan). Cada segmento se decodifica y se procesa (escala + animación
+ * Ken Burns opcional) dentro del mismo grafo de filtros, y los cortes entre
+ * segmentos son un `concat` directo o un `xfade`/`acrossfade` (crossfade)
+ * según `segment.transition`. Devuelve los bytes del mp4 resultante; quien
+ * llama es responsable de subirlos a Storage.
  */
 export async function assembleSegmentsToVideo(
   segments: SegmentAsset[],
@@ -112,6 +179,7 @@ export async function assembleSegmentsToVideo(
     const filterLines: string[] = [];
     const videoLabels: string[] = [];
     const audioLabels: string[] = [];
+    const durations: number[] = [];
 
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i];
@@ -123,18 +191,24 @@ export async function assembleSegmentsToVideo(
       await writeFile(mediaPath, segment.mediaBytes);
       await writeFile(audioPath, segment.audioBytes);
 
-      // El filtro concat necesita que cada rama tenga una duración finita
-      // y exacta: se le pone como límite la duración real del audio de
-      // ese segmento (medida con ffprobe), no una estimación.
       const duration = await probeDurationSeconds(audioPath);
+      durations.push(duration);
 
       const videoInputIndex = i * 2;
+      const audioInputIndex = videoInputIndex + 1;
+
       if (segment.mediaType === "video") {
         inputArgs.push(
           "-stream_loop", "-1",
           "-t", duration.toFixed(3),
           "-i", mediaPath,
         );
+      } else if (segment.animation !== "none") {
+        // Sin -t acá a propósito: con zoompan, ponerle -t al -loop 1
+        // termina multiplicando frames (cada frame del loop dispara su
+        // propio ciclo de zoompan). El corte exacto lo hace el
+        // trim=duration= dentro del filtro (ver buildVideoFilter).
+        inputArgs.push("-loop", "1", "-i", mediaPath);
       } else {
         inputArgs.push(
           "-loop", "1",
@@ -143,26 +217,57 @@ export async function assembleSegmentsToVideo(
         );
       }
       inputArgs.push("-i", audioPath);
-      const audioInputIndex = videoInputIndex + 1;
 
       const vLabel = `v${i}`;
       const aLabel = `a${i}`;
-      filterLines.push(
-        `[${videoInputIndex}:v]scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${FPS},format=yuv420p[${vLabel}]`,
+      const videoFilter = buildVideoFilter(
+        segment.animation,
+        segment.mediaType,
+        duration,
       );
+      filterLines.push(`[${videoInputIndex}:v]${videoFilter}[${vLabel}]`);
       filterLines.push(
         `[${audioInputIndex}:a]aresample=44100,asetpts=PTS-STARTPTS[${aLabel}]`,
       );
-      videoLabels.push(`[${vLabel}]`);
-      audioLabels.push(`[${aLabel}]`);
+      videoLabels.push(vLabel);
+      audioLabels.push(aLabel);
     }
 
-    const concatInputs = videoLabels
-      .map((v, i) => `${v}${audioLabels[i]}`)
-      .join("");
-    filterLines.push(
-      `${concatInputs}concat=n=${segments.length}:v=1:a=1[outv][outa]`,
-    );
+    // Encadena los segmentos de a uno: corte duro (concat) o crossfade
+    // (xfade + acrossfade), según la transición con la que entra cada
+    // segmento desde el anterior.
+    let combinedV = videoLabels[0];
+    let combinedA = audioLabels[0];
+    let combinedDuration = durations[0];
+
+    for (let i = 1; i < segments.length; i++) {
+      const nextV = `cv${i}`;
+      const nextA = `ca${i}`;
+
+      const useCrossfade =
+        segments[i].transition === "crossfade" &&
+        durations[i] > TRANSITION_SECONDS &&
+        combinedDuration > TRANSITION_SECONDS;
+
+      if (useCrossfade) {
+        const offset = (combinedDuration - TRANSITION_SECONDS).toFixed(3);
+        filterLines.push(
+          `[${combinedV}][${videoLabels[i]}]xfade=transition=fade:duration=${TRANSITION_SECONDS}:offset=${offset}[${nextV}]`,
+        );
+        filterLines.push(
+          `[${combinedA}][${audioLabels[i]}]acrossfade=d=${TRANSITION_SECONDS}[${nextA}]`,
+        );
+        combinedDuration = combinedDuration + durations[i] - TRANSITION_SECONDS;
+      } else {
+        filterLines.push(
+          `[${combinedV}][${combinedA}][${videoLabels[i]}][${audioLabels[i]}]concat=n=2:v=1:a=1[${nextV}][${nextA}]`,
+        );
+        combinedDuration = combinedDuration + durations[i];
+      }
+
+      combinedV = nextV;
+      combinedA = nextA;
+    }
 
     const filterScriptPath = path.join(workDir, "filter.txt");
     await writeFile(filterScriptPath, filterLines.join(";\n"));
@@ -172,8 +277,8 @@ export async function assembleSegmentsToVideo(
       "-y",
       ...inputArgs,
       "-filter_complex_script", filterScriptPath,
-      "-map", "[outv]",
-      "-map", "[outa]",
+      "-map", `[${combinedV}]`,
+      "-map", `[${combinedA}]`,
       "-r", String(FPS),
       "-c:v", "libx264",
       "-preset", "veryfast",

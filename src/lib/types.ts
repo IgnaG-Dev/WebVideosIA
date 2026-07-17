@@ -1,6 +1,17 @@
 export type ScriptMode = "manual" | "ia";
 
-export type MediaPreference = "image" | "video";
+export type MediaPreference = "image" | "video" | "gemini";
+
+export type SegmentAnimation =
+  | "none"
+  | "zoom_in"
+  | "zoom_out"
+  | "pan_left"
+  | "pan_right"
+  | "pan_up"
+  | "pan_down";
+
+export type SegmentTransition = "cut" | "crossfade";
 
 export type ProjectStatus =
   | "draft"
@@ -30,6 +41,8 @@ export type Segment = {
   media_type: "image" | "video" | null;
   media_provider: "pexels" | "pixabay" | "gemini" | null;
   audio_url: string | null;
+  animation: SegmentAnimation;
+  transition: SegmentTransition;
   status: SegmentStatus;
   error_message: string | null;
   created_at: string;

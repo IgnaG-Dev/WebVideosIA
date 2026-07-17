@@ -24,3 +24,37 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Preview aproximado (no a escala real) del efecto Ken Burns que arma
+   ffmpeg para cada segmento — ver src/lib/ffmpeg.ts (buildVideoFilter). */
+@keyframes kb-zoom-in {
+  from { transform: scale(1); }
+  to { transform: scale(1.18); }
+}
+@keyframes kb-zoom-out {
+  from { transform: scale(1.18); }
+  to { transform: scale(1); }
+}
+@keyframes kb-pan-left {
+  from { transform: scale(1.18) translateX(6%); }
+  to { transform: scale(1.18) translateX(-6%); }
+}
+@keyframes kb-pan-right {
+  from { transform: scale(1.18) translateX(-6%); }
+  to { transform: scale(1.18) translateX(6%); }
+}
+@keyframes kb-pan-up {
+  from { transform: scale(1.18) translateY(6%); }
+  to { transform: scale(1.18) translateY(-6%); }
+}
+@keyframes kb-pan-down {
+  from { transform: scale(1.18) translateY(-6%); }
+  to { transform: scale(1.18) translateY(6%); }
+}
+
+.kb-preview-zoom_in { animation: kb-zoom-in 4s ease-in-out infinite alternate; }
+.kb-preview-zoom_out { animation: kb-zoom-out 4s ease-in-out infinite alternate; }
+.kb-preview-pan_left { animation: kb-pan-left 4s ease-in-out infinite alternate; }
+.kb-preview-pan_right { animation: kb-pan-right 4s ease-in-out infinite alternate; }
+.kb-preview-pan_up { animation: kb-pan-up 4s ease-in-out infinite alternate; }
+.kb-preview-pan_down { animation: kb-pan-down 4s ease-in-out infinite alternate; }

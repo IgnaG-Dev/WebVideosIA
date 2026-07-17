@@ -81,10 +81,15 @@ export default function NewProjectPage() {
               <input type="radio" name="media_preference" value="video" />
               Videos
             </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" name="media_preference" value="gemini" />
+              Generar con IA (Gemini)
+            </label>
           </div>
           <span className="text-xs text-foreground/50">
-            Del banco de Pexels/Pixabay. Si no encuentra del tipo elegido para
-            algún segmento, usa el otro.
+            Imágenes/videos del banco de Pexels/Pixabay, o imágenes generadas
+            con Gemini a partir del texto de cada segmento. Si no encuentra
+            nada del tipo elegido para algún segmento, cae a imagen de stock.
           </span>
         </div>
 
