@@ -1,11 +1,11 @@
 # --- deps: instala dependencias de node ---
-FROM node:20-slim AS deps
+FROM node:22-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
 # --- builder: compila la app Next.js ---
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 WORKDIR /app
 # Next.js inyecta las variables NEXT_PUBLIC_* en el bundle del cliente en
 # tiempo de build, no de runtime. El panel de deploy usado no expone "build
@@ -20,7 +20,7 @@ COPY . .
 RUN npm run build
 
 # --- runner: imagen final con ffmpeg, corre server + worker ---
-FROM node:20-slim AS runner
+FROM node:22-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
