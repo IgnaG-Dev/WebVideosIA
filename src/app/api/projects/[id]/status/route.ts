@@ -17,7 +17,9 @@ export async function GET(
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
-    .select("status, video_url, error_message")
+    .select(
+      "status, video_url, error_message, progress_step, progress_current, progress_total",
+    )
     .eq("id", id)
     .maybeSingle();
 
@@ -49,6 +51,9 @@ export async function GET(
     status: project.status,
     video_url: project.video_url,
     error_message: project.error_message,
+    progress_step: project.progress_step,
+    progress_current: project.progress_current,
+    progress_total: project.progress_total,
     segments: {
       total,
       images_ready: imagesReady,

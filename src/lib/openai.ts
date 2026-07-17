@@ -37,14 +37,17 @@ function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
+export type ScriptProgress = { attempt: number; maxAttempts: number };
+
 export async function generateScript(input: {
   topic: string;
   tone: string;
   audience: string;
   targetDurationMinutes: number;
   language?: ScriptLanguage;
+  onProgress?: (progress: ScriptProgress) => void;
 }): Promise<string> {
-  const { topic, tone, audience, targetDurationMinutes } = input;
+  const { topic, tone, audience, targetDurationMinutes, onProgress } = input;
   const language = input.language ?? "es";
   const languageName = LANGUAGE_NAME[language];
   const targetWords = Math.round(targetDurationMinutes * WORDS_PER_MINUTE);
@@ -77,6 +80,7 @@ Devolvé únicamente el texto del guion, en ${languageName}, sin títulos ni num
 
   let attempts = 0;
   while (countWords(script) < minWords && attempts < MAX_CONTINUATIONS) {
+    onProgress?.({ attempt: attempts + 1, maxAttempts: MAX_CONTINUATIONS });
     const missingWords = targetWords - countWords(script);
     const continuation = await requestScriptContinuation({
       scriptSoFar: script,

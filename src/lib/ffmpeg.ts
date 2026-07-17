@@ -31,8 +31,13 @@ export type SegmentAsset = {
   text: string;
 };
 
+export type AssembleProgress =
+  | { step: "clips"; current: number; total: number }
+  | { step: "encoding"; current: number; total: number };
+
 export type AssembleOptions = {
   subtitlesEnabled?: boolean;
+  onProgress?: (progress: AssembleProgress) => void;
 };
 
 // Igual que con los fetch externos: un proceso hijo que nunca termina (ej.
@@ -359,10 +364,21 @@ export async function assembleSegmentsToVideo(
 
     // 2) El paso caro, en paralelo: un clip (mp4 sin audio, ya con Ken
     // Burns si corresponde) por segmento.
+    let clipsDone = 0;
+    options.onProgress?.({ step: "clips", current: 0, total: segments.length });
     const clipPaths = await mapWithConcurrency(
       segments,
       CLIP_CONCURRENCY,
-      (segment, i) => renderSegmentClip(workDir, i, segment, durations[i]),
+      async (segment, i) => {
+        const clipPath = await renderSegmentClip(workDir, i, segment, durations[i]);
+        clipsDone++;
+        options.onProgress?.({
+          step: "clips",
+          current: clipsDone,
+          total: segments.length,
+        });
+        return clipPath;
+      },
     );
 
     // 3) Paso final liviano: concatena/cruza los clips ya renderizados
@@ -437,6 +453,7 @@ export async function assembleSegmentsToVideo(
     for (const clipPath of clipPaths) inputArgs.push("-i", clipPath);
     for (const audioPath of audioPaths) inputArgs.push("-i", audioPath);
 
+    options.onProgress?.({ step: "encoding", current: 0, total: 1 });
     const finalPath = path.join(workDir, "final.mp4");
     await runFfmpeg([
       "-y",
@@ -454,6 +471,7 @@ export async function assembleSegmentsToVideo(
       "-ar", "44100",
       finalPath,
     ]);
+    options.onProgress?.({ step: "encoding", current: 1, total: 1 });
 
     return new Uint8Array(await readFile(finalPath));
   } finally {

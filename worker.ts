@@ -98,6 +98,22 @@ async function claimNextJob(admin: SupabaseClient): Promise<JobRow | null> {
   return tryClaim(admin, "processing", STALE_PROCESSING_MS);
 }
 
+// Detalle de progreso para los pasos que, sin esto, son una caja negra
+// para el usuario (continuación del guion, render de clips, armado final,
+// subida a Storage) — la pantalla de progreso lo lee vía /status.
+async function setProgress(
+  admin: SupabaseClient,
+  projectId: string,
+  step: string | null,
+  current: number,
+  total: number,
+) {
+  await admin
+    .from("projects")
+    .update({ progress_step: step, progress_current: current, progress_total: total })
+    .eq("id", projectId);
+}
+
 // ---------------------------------------------------------------------------
 // generate_script
 // ---------------------------------------------------------------------------
@@ -114,13 +130,20 @@ async function processGenerateScript(admin: SupabaseClient, projectId: string) {
     throw new Error("Faltan tema, tono o público para generar el guion.");
   }
 
+  await setProgress(admin, projectId, "script", 0, 0);
+
   const fullScript = await generateScript({
     topic: project.topic,
     tone: project.tone,
     audience: project.audience,
     targetDurationMinutes: project.target_duration_minutes,
     language: project.script_language === "en" ? "en" : "es",
+    onProgress: ({ attempt, maxAttempts }) => {
+      void setProgress(admin, projectId, "continuing_script", attempt, maxAttempts);
+    },
   });
+
+  await setProgress(admin, projectId, "segmenting", 0, 0);
 
   const segments = await segmentScript({
     fullScript,
@@ -328,6 +351,7 @@ async function processGenerateVideo(admin: SupabaseClient, projectId: string) {
     .from("projects")
     .update({ status: "generating_images" })
     .eq("id", projectId);
+  await setProgress(admin, projectId, null, 0, 0);
   await mapWithConcurrency(segments, SEGMENT_CONCURRENCY, (segment) =>
     processSegmentMedia(admin, projectId, segment, mediaPreference),
   );
@@ -406,8 +430,18 @@ async function processAssembly(admin: SupabaseClient, projectId: string) {
 
   const finalVideoBytes = await assembleSegmentsToVideo(assets, {
     subtitlesEnabled: project?.subtitles_enabled === true,
+    onProgress: (progress) => {
+      void setProgress(
+        admin,
+        projectId,
+        progress.step,
+        progress.current,
+        progress.total,
+      );
+    },
   });
 
+  await setProgress(admin, projectId, "uploading", 0, 1);
   const finalPath = `${projectId}/final/video.mp4`;
   const { error: uploadError } = await admin.storage
     .from(ASSETS_BUCKET)
@@ -415,6 +449,7 @@ async function processAssembly(admin: SupabaseClient, projectId: string) {
   if (uploadError) {
     throw new Error(`No se pudo subir el video final: ${uploadError.message}`);
   }
+  await setProgress(admin, projectId, "uploading", 1, 1);
 
   const { data: publicUrlData } = admin.storage
     .from(ASSETS_BUCKET)

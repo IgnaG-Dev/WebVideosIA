@@ -21,8 +21,23 @@ const IN_PROGRESS_LABEL: Record<string, string> = {
   assembling: "Armando el video final...",
 };
 
+// Detalle de lo que está pasando dentro de un status, para que los pasos
+// que antes eran una caja negra (continuar el guion, renderizar los clips
+// con animación, codificar, subir) tengan feedback visible.
+const PROGRESS_STEP_LABEL: Record<string, string> = {
+  script: "Escribiendo el guion...",
+  continuing_script: "El guion quedó corto, extendiéndolo...",
+  segmenting: "Dividiendo el guion en segmentos...",
+  clips: "Renderizando la animación de cada segmento...",
+  encoding: "Uniendo los segmentos y codificando el video...",
+  uploading: "Subiendo el video final...",
+};
+
 type StatusResponse = {
   status: string;
+  progress_step: string | null;
+  progress_current: number;
+  progress_total: number;
   segments: {
     total: number;
     images_ready: number;
@@ -83,10 +98,25 @@ export function ProjectProgress({
 
   const currentStatus = data?.status ?? initialStatus;
   const segments = data?.segments;
+  const progressStep = data?.progress_step ?? null;
 
   return (
     <div className="flex flex-col gap-3 rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
       <p>{IN_PROGRESS_LABEL[currentStatus] ?? "Procesando..."}</p>
+      {progressStep && (
+        <div className="flex flex-col gap-1">
+          <span className="text-xs">
+            {PROGRESS_STEP_LABEL[progressStep] ?? progressStep}
+          </span>
+          {data && data.progress_total > 1 && (
+            <ProgressBar
+              label={`${data.progress_current}/${data.progress_total}`}
+              value={data.progress_current}
+              total={data.progress_total}
+            />
+          )}
+        </div>
+      )}
       {segments && segments.total > 0 && (
         <div className="flex flex-col gap-2">
           <ProgressBar

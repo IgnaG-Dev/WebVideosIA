@@ -61,6 +61,9 @@ export type Project = {
   media_preference: MediaPreference;
   script_language: ScriptLanguage;
   subtitles_enabled: boolean;
+  progress_step: string | null;
+  progress_current: number;
+  progress_total: number;
   topic: string | null;
   tone: string | null;
   audience: string | null;
