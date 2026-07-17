@@ -1,12 +1,18 @@
 import "server-only";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cpus, tmpdir } from "node:os";
 import path from "node:path";
 
 const WIDTH = 1280;
 const HEIGHT = 720;
 const FPS = 25;
+
+// Varios ffmpeg corriendo a la vez compiten por CPU, así que se reparten los
+// cores disponibles en vez de dejar que cada uno intente usarlos todos.
+const CPU_COUNT = cpus().length || 2;
+const CLIP_BUILD_CONCURRENCY = Math.max(1, Math.min(4, CPU_COUNT));
+const THREADS_PER_CLIP = Math.max(1, Math.floor(CPU_COUNT / CLIP_BUILD_CONCURRENCY));
 
 export type SegmentAsset = {
   mediaType: "image" | "video";
@@ -35,6 +41,25 @@ function runFfmpeg(args: string[]): Promise<void> {
   });
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let index = 0;
+  async function worker() {
+    while (index < items.length) {
+      const current = index++;
+      results[current] = await task(items[current], current);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  );
+  return results;
+}
+
 async function buildSegmentClip(
   workDir: string,
   segment: SegmentAsset,
@@ -61,6 +86,8 @@ async function buildSegmentClip(
           "-vf", scaleFilter,
           "-r", String(FPS),
           "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-threads", String(THREADS_PER_CLIP),
           "-pix_fmt", "yuv420p",
           "-c:a", "aac",
           "-b:a", "192k",
@@ -76,6 +103,8 @@ async function buildSegmentClip(
           "-vf", scaleFilter,
           "-r", String(FPS),
           "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-threads", String(THREADS_PER_CLIP),
           "-tune", "stillimage",
           "-pix_fmt", "yuv420p",
           "-c:a", "aac",
@@ -103,10 +132,11 @@ export async function assembleSegmentsToVideo(
 
   const workDir = await mkdtemp(path.join(tmpdir(), "video-ia-"));
   try {
-    const clipPaths: string[] = [];
-    for (let i = 0; i < segments.length; i++) {
-      clipPaths.push(await buildSegmentClip(workDir, segments[i], i));
-    }
+    const clipPaths = await mapWithConcurrency(
+      segments,
+      CLIP_BUILD_CONCURRENCY,
+      (segment, index) => buildSegmentClip(workDir, segment, index),
+    );
 
     const listPath = path.join(workDir, "concat.txt");
     const listContent = clipPaths

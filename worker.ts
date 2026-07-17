@@ -48,22 +48,24 @@ function extensionFromContentType(contentType: string): string {
   return map[contentType] ?? contentType.split("/")[1]?.split(";")[0] ?? "bin";
 }
 
-async function runWithConcurrency<T>(
+async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
-  task: (item: T) => Promise<void>,
-) {
+  task: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
   let index = 0;
   async function worker() {
     while (index < items.length) {
-      const current = items[index++];
-      await task(current);
+      const current = index++;
+      results[current] = await task(items[current], current);
     }
   }
   const workers = Array.from({ length: Math.min(limit, items.length) }, () =>
     worker(),
   );
   await Promise.all(workers);
+  return results;
 }
 
 type JobRow = {
@@ -153,102 +155,109 @@ type SegmentRow = {
   text: string;
 };
 
-async function processSegmentImage(
+async function fetchAndUploadImage(
   admin: SupabaseClient,
   projectId: string,
   segment: SegmentRow,
 ) {
-  try {
-    const keywords = extractKeywords(segment.text);
-    const result = await searchMedia(keywords);
-    if (!result) {
-      throw new Error(
-        `No se encontró imagen/video para las palabras clave: "${keywords}".`,
-      );
-    }
-
-    const { bytes, contentType } = await downloadMedia(result.url);
-    const extension = extensionFromContentType(contentType);
-    const path = `${projectId}/segments/${segment.id}/image.${extension}`;
-
-    const { error: uploadError } = await admin.storage
-      .from(ASSETS_BUCKET)
-      .upload(path, bytes, { contentType, upsert: true });
-    if (uploadError) {
-      throw new Error(
-        `No se pudo subir el media a Storage: ${uploadError.message}`,
-      );
-    }
-
-    const { data: publicUrlData } = admin.storage
-      .from(ASSETS_BUCKET)
-      .getPublicUrl(path);
-
-    await admin
-      .from("segments")
-      .update({
-        image_url: publicUrlData.publicUrl,
-        media_type: result.type,
-        media_provider: result.provider,
-        status: "image_ready",
-        error_message: null,
-      })
-      .eq("id", segment.id);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await admin
-      .from("segments")
-      .update({ status: "error", error_message: message })
-      .eq("id", segment.id);
+  const keywords = extractKeywords(segment.text);
+  const result = await searchMedia(keywords);
+  if (!result) {
+    throw new Error(
+      `No se encontró imagen/video para las palabras clave: "${keywords}".`,
+    );
   }
+
+  const { bytes, contentType } = await downloadMedia(result.url);
+  const extension = extensionFromContentType(contentType);
+  const path = `${projectId}/segments/${segment.id}/image.${extension}`;
+
+  const { error: uploadError } = await admin.storage
+    .from(ASSETS_BUCKET)
+    .upload(path, bytes, { contentType, upsert: true });
+  if (uploadError) {
+    throw new Error(
+      `No se pudo subir el media a Storage: ${uploadError.message}`,
+    );
+  }
+
+  const { data: publicUrlData } = admin.storage
+    .from(ASSETS_BUCKET)
+    .getPublicUrl(path);
+
+  await admin
+    .from("segments")
+    .update({
+      image_url: publicUrlData.publicUrl,
+      media_type: result.type,
+      media_provider: result.provider,
+    })
+    .eq("id", segment.id);
 }
 
-async function processSegmentAudio(
+async function fetchAndUploadAudio(
   admin: SupabaseClient,
   projectId: string,
   segment: SegmentRow,
 ) {
-  const { data: current } = await admin
-    .from("segments")
-    .select("status")
-    .eq("id", segment.id)
-    .single();
-  // Si la imagen de este segmento ya falló, no tiene sentido generar el
-  // audio — el segmento queda en error y así se reporta al final.
-  if (current?.status === "error") return;
+  const { bytes, contentType } = await synthesizeSpeech(segment.text);
+  const path = `${projectId}/segments/${segment.id}/audio.mp3`;
 
-  try {
-    const { bytes, contentType } = await synthesizeSpeech(segment.text);
-    const path = `${projectId}/segments/${segment.id}/audio.mp3`;
-
-    const { error: uploadError } = await admin.storage
-      .from(ASSETS_BUCKET)
-      .upload(path, bytes, { contentType, upsert: true });
-    if (uploadError) {
-      throw new Error(
-        `No se pudo subir el audio a Storage: ${uploadError.message}`,
-      );
-    }
-
-    const { data: publicUrlData } = admin.storage
-      .from(ASSETS_BUCKET)
-      .getPublicUrl(path);
-
-    await admin
-      .from("segments")
-      .update({
-        audio_url: publicUrlData.publicUrl,
-        status: "ready",
-        error_message: null,
-      })
-      .eq("id", segment.id);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await admin
-      .from("segments")
-      .update({ status: "error", error_message: message })
-      .eq("id", segment.id);
+  const { error: uploadError } = await admin.storage
+    .from(ASSETS_BUCKET)
+    .upload(path, bytes, { contentType, upsert: true });
+  if (uploadError) {
+    throw new Error(
+      `No se pudo subir el audio a Storage: ${uploadError.message}`,
+    );
   }
+
+  const { data: publicUrlData } = admin.storage
+    .from(ASSETS_BUCKET)
+    .getPublicUrl(path);
+
+  await admin
+    .from("segments")
+    .update({ audio_url: publicUrlData.publicUrl })
+    .eq("id", segment.id);
+}
+
+// Imagen y audio de un segmento se buscan/generan en paralelo (son APIs
+// externas independientes) en vez de en dos fases secuenciales — reduce a
+// la mitad el tiempo de esta etapa.
+async function processSegmentMedia(
+  admin: SupabaseClient,
+  projectId: string,
+  segment: SegmentRow,
+) {
+  const [imageResult, audioResult] = await Promise.allSettled([
+    fetchAndUploadImage(admin, projectId, segment),
+    fetchAndUploadAudio(admin, projectId, segment),
+  ]);
+
+  if (imageResult.status === "fulfilled" && audioResult.status === "fulfilled") {
+    await admin
+      .from("segments")
+      .update({ status: "ready", error_message: null })
+      .eq("id", segment.id);
+    return;
+  }
+
+  const messages: string[] = [];
+  if (imageResult.status === "rejected") {
+    messages.push(`Imagen: ${errorMessage(imageResult.reason)}`);
+  }
+  if (audioResult.status === "rejected") {
+    messages.push(`Audio: ${errorMessage(audioResult.reason)}`);
+  }
+  await admin
+    .from("segments")
+    .update({ status: "error", error_message: messages.join(" | ") })
+    .eq("id", segment.id);
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 async function processGenerateVideo(admin: SupabaseClient, projectId: string) {
@@ -267,16 +276,8 @@ async function processGenerateVideo(admin: SupabaseClient, projectId: string) {
     .from("projects")
     .update({ status: "generating_images" })
     .eq("id", projectId);
-  await runWithConcurrency(segments, SEGMENT_CONCURRENCY, (segment) =>
-    processSegmentImage(admin, projectId, segment),
-  );
-
-  await admin
-    .from("projects")
-    .update({ status: "generating_audio" })
-    .eq("id", projectId);
-  await runWithConcurrency(segments, SEGMENT_CONCURRENCY, (segment) =>
-    processSegmentAudio(admin, projectId, segment),
+  await mapWithConcurrency(segments, SEGMENT_CONCURRENCY, (segment) =>
+    processSegmentMedia(admin, projectId, segment),
   );
 
   const { data: finalSegments } = await admin
@@ -317,22 +318,27 @@ async function processAssembly(admin: SupabaseClient, projectId: string) {
     throw new Error("El proyecto no tiene segmentos para armar el video.");
   }
 
-  const assets: SegmentAsset[] = [];
-  for (const segment of segments) {
-    if (!segment.image_url || !segment.audio_url) {
-      throw new Error(
-        `El segmento ${segment.order_index + 1} no tiene imagen/video o audio listos.`,
-      );
-    }
-    const media = await downloadMedia(segment.image_url);
-    const audio = await downloadMedia(segment.audio_url);
-    assets.push({
-      mediaType: segment.media_type === "video" ? "video" : "image",
-      mediaBytes: media.bytes,
-      mediaExtension: extensionFromContentType(media.contentType),
-      audioBytes: audio.bytes,
-    });
-  }
+  const assets = await mapWithConcurrency(
+    segments,
+    SEGMENT_CONCURRENCY,
+    async (segment): Promise<SegmentAsset> => {
+      if (!segment.image_url || !segment.audio_url) {
+        throw new Error(
+          `El segmento ${segment.order_index + 1} no tiene imagen/video o audio listos.`,
+        );
+      }
+      const [media, audio] = await Promise.all([
+        downloadMedia(segment.image_url),
+        downloadMedia(segment.audio_url),
+      ]);
+      return {
+        mediaType: segment.media_type === "video" ? "video" : "image",
+        mediaBytes: media.bytes,
+        mediaExtension: extensionFromContentType(media.contentType),
+        audioBytes: audio.bytes,
+      };
+    },
+  );
 
   const finalVideoBytes = await assembleSegmentsToVideo(assets);
 

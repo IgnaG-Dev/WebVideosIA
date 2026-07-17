@@ -27,7 +27,7 @@ export async function GET(
 
   const { data: segments, error: segmentsError } = await supabase
     .from("segments")
-    .select("status")
+    .select("status, image_url, audio_url")
     .eq("project_id", id);
 
   if (segmentsError) {
@@ -37,11 +37,12 @@ export async function GET(
     );
   }
 
+  // Imagen y audio se generan en paralelo por segmento, así que cada campo
+  // se cuenta por su propia presencia (no por el status general del
+  // segmento) para que la barra de progreso avance en tiempo real.
   const total = segments.length;
-  const imagesReady = segments.filter((s) =>
-    ["image_ready", "ready"].includes(s.status),
-  ).length;
-  const audiosReady = segments.filter((s) => s.status === "ready").length;
+  const imagesReady = segments.filter((s) => !!s.image_url).length;
+  const audiosReady = segments.filter((s) => !!s.audio_url).length;
   const errors = segments.filter((s) => s.status === "error").length;
 
   return NextResponse.json({
