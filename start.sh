@@ -4,7 +4,7 @@ set -e
 npx tsx --conditions=react-server worker.ts &
 WORKER_PID=$!
 
-next start &
+npx next start &
 SERVER_PID=$!
 
 trap 'kill -TERM $WORKER_PID $SERVER_PID 2>/dev/null' TERM INT
