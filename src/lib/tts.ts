@@ -1,4 +1,7 @@
 import "server-only";
+import { fetchWithTimeout } from "./fetch-with-timeout";
+
+const TTS_TIMEOUT_MS = 45000;
 
 export type TTSResult = { bytes: Uint8Array; contentType: string };
 
@@ -18,7 +21,7 @@ const elevenLabsProvider: TTSProviderImpl = {
     }
     const voiceId = process.env.TTS_VOICE_ID || DEFAULT_ELEVENLABS_VOICE_ID;
 
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
       {
         method: "POST",
@@ -33,6 +36,7 @@ const elevenLabsProvider: TTSProviderImpl = {
           voice_settings: { stability: 0.5, similarity_boost: 0.75 },
         }),
       },
+      TTS_TIMEOUT_MS,
     );
 
     if (!res.ok) {
@@ -54,18 +58,22 @@ const openaiProvider: TTSProviderImpl = {
       throw new Error("Falta TTS_API_KEY para el proveedor openai.");
     }
 
-    const res = await fetch("https://api.openai.com/v1/audio/speech", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+    const res = await fetchWithTimeout(
+      "https://api.openai.com/v1/audio/speech",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "tts-1",
+          voice: "alloy",
+          input: text,
+        }),
       },
-      body: JSON.stringify({
-        model: "tts-1",
-        voice: "alloy",
-        input: text,
-      }),
-    });
+      TTS_TIMEOUT_MS,
+    );
 
     if (!res.ok) {
       const message = await res.text().catch(() => "");

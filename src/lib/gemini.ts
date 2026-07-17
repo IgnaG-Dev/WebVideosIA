@@ -1,6 +1,8 @@
 import "server-only";
+import { fetchWithTimeout } from "./fetch-with-timeout";
 
 const MODEL = "gemini-2.5-flash-image";
+const TIMEOUT_MS = 45000;
 
 /**
  * Genera una imagen con Gemini a partir de un prompt de texto. Pensado como
@@ -12,10 +14,10 @@ export async function generateImageWithGemini(
 ): Promise<{ bytes: Uint8Array; contentType: string }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("Falta GEMINI_API_KEY para generar imágenes con Gemini.");
+    throw new Error("Falta configurar la generación de imágenes con IA.");
   }
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`,
     {
       method: "POST",
@@ -24,11 +26,14 @@ export async function generateImageWithGemini(
         contents: [{ parts: [{ text: prompt }] }],
       }),
     },
+    TIMEOUT_MS,
   );
 
   if (!res.ok) {
     const message = await res.text().catch(() => "");
-    throw new Error(`Gemini falló (${res.status}): ${message.slice(0, 300)}`);
+    throw new Error(
+      `La generación de imagen con IA falló (${res.status}): ${message.slice(0, 300)}`,
+    );
   }
 
   const json = (await res.json()) as {
@@ -42,7 +47,7 @@ export async function generateImageWithGemini(
   const parts = json.candidates?.[0]?.content?.parts ?? [];
   const imagePart = parts.find((p) => p.inlineData?.data);
   if (!imagePart?.inlineData) {
-    throw new Error("Gemini no devolvió ninguna imagen.");
+    throw new Error("La IA no devolvió ninguna imagen.");
   }
 
   const bytes = Uint8Array.from(

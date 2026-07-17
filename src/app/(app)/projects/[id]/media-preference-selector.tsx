@@ -52,7 +52,7 @@ export function MediaPreferenceSelector({
           disabled={isPending}
           onChange={() => handleChange("gemini")}
         />
-        Generar con IA (Gemini)
+        Generar con IA
       </label>
     </div>
   );

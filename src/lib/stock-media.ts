@@ -1,4 +1,8 @@
 import "server-only";
+import { fetchWithTimeout } from "./fetch-with-timeout";
+
+const SEARCH_TIMEOUT_MS = 20000;
+const DOWNLOAD_TIMEOUT_MS = 30000;
 
 export type MediaType = "image" | "video";
 export type MediaProvider = "pexels" | "pixabay" | "gemini";
@@ -22,9 +26,10 @@ const pexelsSource: StockMediaSource = {
     const apiKey = process.env.PEXELS_API_KEY;
     if (!apiKey) return null;
 
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://api.pexels.com/v1/search?query=${encodeURIComponent(keywords)}&per_page=1&page=${page}&orientation=landscape`,
       { headers: { Authorization: apiKey } },
+      SEARCH_TIMEOUT_MS,
     );
     if (!res.ok) return null;
 
@@ -41,9 +46,10 @@ const pexelsSource: StockMediaSource = {
     const apiKey = process.env.PEXELS_API_KEY;
     if (!apiKey) return null;
 
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://api.pexels.com/videos/search?query=${encodeURIComponent(keywords)}&per_page=1&page=${page}&orientation=landscape`,
       { headers: { Authorization: apiKey } },
+      SEARCH_TIMEOUT_MS,
     );
     if (!res.ok) return null;
 
@@ -71,8 +77,10 @@ const pixabaySource: StockMediaSource = {
     const apiKey = process.env.PIXABAY_API_KEY;
     if (!apiKey) return null;
 
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://pixabay.com/api/?key=${apiKey}&q=${encodeURIComponent(keywords)}&image_type=photo&per_page=3&page=${page}&safesearch=true`,
+      {},
+      SEARCH_TIMEOUT_MS,
     );
     if (!res.ok) return null;
 
@@ -89,8 +97,10 @@ const pixabaySource: StockMediaSource = {
     const apiKey = process.env.PIXABAY_API_KEY;
     if (!apiKey) return null;
 
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://pixabay.com/api/videos/?key=${apiKey}&q=${encodeURIComponent(keywords)}&per_page=3&page=${page}&safesearch=true`,
+      {},
+      SEARCH_TIMEOUT_MS,
     );
     if (!res.ok) return null;
 
@@ -158,7 +168,7 @@ export async function searchDifferentMedia(
 export async function downloadMedia(
   url: string,
 ): Promise<{ bytes: Uint8Array; contentType: string }> {
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url, {}, DOWNLOAD_TIMEOUT_MS);
   if (!res.ok) {
     throw new Error(`No se pudo descargar el media (${res.status}): ${url}`);
   }

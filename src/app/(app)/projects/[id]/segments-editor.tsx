@@ -72,6 +72,12 @@ export function SegmentsEditor({
 
   const segmentById = new Map(segments.map((s) => [s.id, s]));
 
+  // Para la muestra en "Aplicar a todos" alcanza con cualquier imagen o
+  // video que ya tenga un segmento (no importa cuál) — si no hay ninguno
+  // todavía, se muestra un cuadro de color como placeholder.
+  const previewSegment = segments.find((s) => s.image_url) ?? null;
+  const previewIsVideo = previewSegment?.media_type === "video";
+
   function updateRow(id: string, patch: Partial<Row>) {
     setSaved(false);
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -195,46 +201,84 @@ export function SegmentsEditor({
         </span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 rounded-md bg-black/5 px-3 py-2 text-xs">
-        <span className="text-foreground/60">Aplicar a todos:</span>
-        <select
-          value={bulkAnimation}
-          onChange={(e) => setBulkAnimation(e.target.value as SegmentAnimation)}
-          className="rounded border border-black/10 px-1 py-0.5"
-        >
-          {ANIMATION_OPTIONS.map((a) => (
-            <option key={a} value={a}>
-              {ANIMATION_LABELS[a]}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={handleApplyAnimationToAll}
-          disabled={isPending}
-          className="rounded border border-black/10 px-2 py-0.5 disabled:opacity-50"
-        >
-          Aplicar animación
-        </button>
-        <select
-          value={bulkTransition}
-          onChange={(e) => setBulkTransition(e.target.value as SegmentTransition)}
-          className="rounded border border-black/10 px-1 py-0.5"
-        >
-          {(Object.keys(TRANSITION_LABELS) as SegmentTransition[]).map((t) => (
-            <option key={t} value={t}>
-              {TRANSITION_LABELS[t]}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={handleApplyTransitionToAll}
-          disabled={isPending}
-          className="rounded border border-black/10 px-2 py-0.5 disabled:opacity-50"
-        >
-          Aplicar transición
-        </button>
+      <div className="flex flex-wrap items-center gap-3 rounded-md bg-black/5 px-3 py-2 text-xs">
+        <div className="flex h-20 w-32 shrink-0 items-center justify-center overflow-hidden rounded-md bg-black/10">
+          {previewSegment && previewIsVideo ? (
+            <video
+              key={previewSegment.id}
+              src={previewSegment.image_url!}
+              muted
+              loop
+              autoPlay
+              className="h-full w-full object-cover"
+            />
+          ) : previewSegment ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={`${previewSegment.id}-${bulkAnimation}`}
+              src={previewSegment.image_url!}
+              alt="Muestra de animación"
+              className={`h-full w-full object-cover ${
+                bulkAnimation !== "none" ? `kb-preview-${bulkAnimation}` : ""
+              }`}
+            />
+          ) : (
+            <div
+              key={bulkAnimation}
+              className={`h-full w-full bg-gradient-to-br from-indigo-400 to-fuchsia-500 ${
+                bulkAnimation !== "none" ? `kb-preview-${bulkAnimation}` : ""
+              }`}
+            />
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-foreground/60">Aplicar a todos:</span>
+          <select
+            value={bulkAnimation}
+            onChange={(e) => setBulkAnimation(e.target.value as SegmentAnimation)}
+            className="rounded border border-black/10 bg-white px-1 py-0.5 text-black"
+          >
+            {ANIMATION_OPTIONS.map((a) => (
+              <option key={a} value={a}>
+                {ANIMATION_LABELS[a]}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleApplyAnimationToAll}
+            disabled={isPending}
+            className="rounded border border-black/10 px-2 py-0.5 disabled:opacity-50"
+          >
+            Aplicar animación
+          </button>
+          <select
+            value={bulkTransition}
+            onChange={(e) => setBulkTransition(e.target.value as SegmentTransition)}
+            className="rounded border border-black/10 bg-white px-1 py-0.5 text-black"
+          >
+            {(Object.keys(TRANSITION_LABELS) as SegmentTransition[]).map((t) => (
+              <option key={t} value={t}>
+                {TRANSITION_LABELS[t]}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleApplyTransitionToAll}
+            disabled={isPending}
+            className="rounded border border-black/10 px-2 py-0.5 disabled:opacity-50"
+          >
+            Aplicar transición
+          </button>
+          {previewIsVideo && (
+            <span className="w-full text-foreground/50">
+              Los segmentos de video se muestran tal cual (la animación solo
+              aplica a imágenes).
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="flex gap-3 overflow-x-auto pb-2">
@@ -340,7 +384,7 @@ export function SegmentsEditor({
                   onChange={(e) =>
                     handleAnimationChange(id, e.target.value as SegmentAnimation)
                   }
-                  className="flex-1 rounded border border-black/10 px-1 py-0.5 disabled:opacity-50"
+                  className="flex-1 rounded border border-black/10 bg-white px-1 py-0.5 text-black disabled:opacity-50"
                 >
                   {ANIMATION_OPTIONS.map((a) => (
                     <option key={a} value={a}>
@@ -358,7 +402,7 @@ export function SegmentsEditor({
                     onChange={(e) =>
                       handleTransitionChange(id, e.target.value as SegmentTransition)
                     }
-                    className="flex-1 rounded border border-black/10 px-1 py-0.5"
+                    className="flex-1 rounded border border-black/10 bg-white px-1 py-0.5 text-black"
                   >
                     {(Object.keys(TRANSITION_LABELS) as SegmentTransition[]).map(
                       (t) => (

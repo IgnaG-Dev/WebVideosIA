@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { segmentScript } from "@/lib/openai";
-import type { MediaPreference, ScriptMode } from "@/lib/types";
+import type { MediaPreference, ScriptLanguage, ScriptMode } from "@/lib/types";
 
 export type CreateProjectState = { error: string | null };
 
@@ -109,6 +109,8 @@ export async function createProject(
     if (!topic || !tone || !audience) {
       return { error: "Completá tema, tono y público." };
     }
+    const scriptLanguage: ScriptLanguage =
+      String(formData.get("script_language") ?? "") === "en" ? "en" : "es";
 
     const { data: project, error: insertError } = await supabase
       .from("projects")
@@ -118,6 +120,7 @@ export async function createProject(
         script_mode: "ia",
         target_duration_minutes: targetDurationMinutes,
         media_preference: mediaPreference,
+        script_language: scriptLanguage,
         topic,
         tone,
         audience,

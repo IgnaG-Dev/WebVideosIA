@@ -1,5 +1,7 @@
 export type ScriptMode = "manual" | "ia";
 
+export type ScriptLanguage = "es" | "en";
+
 export type MediaPreference = "image" | "video" | "gemini";
 
 export type SegmentAnimation =
@@ -57,6 +59,7 @@ export type Project = {
   status: ProjectStatus;
   target_duration_minutes: number;
   media_preference: MediaPreference;
+  script_language: ScriptLanguage;
   topic: string | null;
   tone: string | null;
   audience: string | null;

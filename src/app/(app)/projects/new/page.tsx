@@ -83,12 +83,12 @@ export default function NewProjectPage() {
             </label>
             <label className="flex items-center gap-2">
               <input type="radio" name="media_preference" value="gemini" />
-              Generar con IA (Gemini)
+              Generar con IA
             </label>
           </div>
           <span className="text-xs text-foreground/50">
             Imágenes/videos del banco de Pexels/Pixabay, o imágenes generadas
-            con Gemini a partir del texto de cada segmento. Si no encuentra
+            con IA a partir del texto de cada segmento. Si no encuentra
             nada del tipo elegido para algún segmento, cae a imagen de stock.
           </span>
         </div>
@@ -105,6 +105,24 @@ export default function NewProjectPage() {
           </label>
         ) : (
           <>
+            <div className="flex flex-col gap-2 text-sm">
+              <span>Idioma del guion</span>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="script_language"
+                    value="es"
+                    defaultChecked
+                  />
+                  Español
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="radio" name="script_language" value="en" />
+                  Inglés
+                </label>
+              </div>
+            </div>
             <label className="flex flex-col gap-1 text-sm">
               Tema
               <input

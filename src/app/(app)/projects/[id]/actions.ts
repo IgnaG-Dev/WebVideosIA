@@ -315,7 +315,7 @@ export async function generateSegmentImageWithGemini(
     return { error: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { error: `No se pudo generar la imagen con Gemini: ${message}` };
+    return { error: `No se pudo generar la imagen con IA: ${message}` };
   }
 }
 

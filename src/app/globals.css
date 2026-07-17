@@ -52,6 +52,14 @@ body {
   to { transform: scale(1.18) translateY(6%); }
 }
 
+/* El popup nativo de <select> suele renderizar con fondo claro sin importar
+   el tema de la página — si el texto hereda un color claro (tema oscuro)
+   queda ilegible. Se fuerza contraste acá como red de seguridad. */
+select, option {
+  color: #111;
+  background-color: #fff;
+}
+
 .kb-preview-zoom_in { animation: kb-zoom-in 4s ease-in-out infinite alternate; }
 .kb-preview-zoom_out { animation: kb-zoom-out 4s ease-in-out infinite alternate; }
 .kb-preview-pan_left { animation: kb-pan-left 4s ease-in-out infinite alternate; }

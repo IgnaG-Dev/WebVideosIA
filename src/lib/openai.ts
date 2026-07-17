@@ -1,11 +1,14 @@
 import "server-only";
 import OpenAI from "openai";
+import type { ScriptLanguage } from "./types";
 
 let client: OpenAI | null = null;
 
 function getClient(): OpenAI {
   if (!client) {
-    client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    // timeout explícito: sin esto, una request colgada deja la promesa sin
+    // resolver para siempre y traba el job del worker que la esté esperando.
+    client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 90000 });
   }
   return client;
 }
@@ -16,7 +19,7 @@ export type ScriptSegment = {
   estimated_duration_seconds: number;
 };
 
-// Ritmo de narración promedio en español, usado para estimar duraciones.
+// Ritmo de narración promedio, usado para estimar duraciones.
 const WORDS_PER_MINUTE = 140;
 
 // Los modelos suelen quedarse cortos cuando se les pide un texto muy largo
@@ -24,6 +27,11 @@ const WORDS_PER_MINUTE = 140;
 // llega, se le pide que siga escribiendo (sin repetirse) hasta acercarse.
 const MIN_WORDS_RATIO = 0.95;
 const MAX_CONTINUATIONS = 8;
+
+const LANGUAGE_NAME: Record<ScriptLanguage, string> = {
+  es: "español",
+  en: "inglés",
+};
 
 function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
@@ -34,8 +42,11 @@ export async function generateScript(input: {
   tone: string;
   audience: string;
   targetDurationMinutes: number;
+  language?: ScriptLanguage;
 }): Promise<string> {
   const { topic, tone, audience, targetDurationMinutes } = input;
+  const language = input.language ?? "es";
+  const languageName = LANGUAGE_NAME[language];
   const targetWords = Math.round(targetDurationMinutes * WORDS_PER_MINUTE);
   const minWords = Math.round(targetWords * MIN_WORDS_RATIO);
 
@@ -54,7 +65,7 @@ export async function generateScript(input: {
 Tono: ${tone}.
 Público objetivo: ${audience}.
 Duración objetivo: ${targetDurationMinutes} minutos. Tiene que tener **como mínimo ${targetWords} palabras** (a ritmo de ${WORDS_PER_MINUTE} palabras por minuto) — es muy importante que no quede corto, desarrollá el tema con la profundidad necesaria para llegar a esa extensión.
-Devolvé únicamente el texto del guion, en español, sin títulos ni numeración.`,
+Devolvé únicamente el texto del guion, en ${languageName}, sin títulos ni numeración.`,
       },
     ],
   });
@@ -73,6 +84,7 @@ Devolvé únicamente el texto del guion, en español, sin títulos ni numeració
       tone,
       audience,
       missingWords,
+      language,
     });
     script = `${script}\n\n${continuation}`.trim();
     attempts++;
@@ -87,8 +99,10 @@ async function requestScriptContinuation(input: {
   tone: string;
   audience: string;
   missingWords: number;
+  language: ScriptLanguage;
 }): Promise<string> {
-  const { scriptSoFar, topic, tone, audience, missingWords } = input;
+  const { scriptSoFar, topic, tone, audience, missingWords, language } = input;
+  const languageName = LANGUAGE_NAME[language];
 
   const completion = await getClient().chat.completions.create({
     model: "gpt-4o-mini",
@@ -102,7 +116,7 @@ async function requestScriptContinuation(input: {
       {
         role: "user",
         content: `Este guion sobre "${topic}" (tono: ${tone}, público: ${audience}) quedó corto. Continualo desde donde termina, agregando contenido nuevo y relevante (no repitas nada de lo ya escrito) hasta sumar aproximadamente ${missingWords} palabras más.
-Devolvé únicamente el texto que continúa, en español, sin repetir el guion anterior.
+Devolvé únicamente el texto que continúa, en ${languageName}, sin repetir el guion anterior.
 
 Guion hasta ahora:
 """
@@ -133,11 +147,11 @@ export async function segmentScript(input: {
       {
         role: "system",
         content:
-          "Dividís guiones de video en segmentos narrativos cortos (una idea visual por segmento), preservando el texto original palabra por palabra, sin reescribirlo ni resumirlo. Respondés únicamente JSON.",
+          "Dividís guiones de video en segmentos narrativos cortos (una idea visual por segmento), preservando el texto original palabra por palabra, sin reescribirlo ni resumirlo ni traducirlo. Respondés únicamente JSON.",
       },
       {
         role: "user",
-        content: `Dividí el siguiente guion en segmentos de entre 5 y 15 segundos de narración cada uno (a ritmo de ${WORDS_PER_MINUTE} palabras por minuto). No agregues ni quites contenido, solo cortá el texto en los puntos naturales. La suma de las duraciones debe aproximarse a ${targetDurationMinutes * 60} segundos.
+        content: `Dividí el siguiente guion en segmentos de entre 5 y 15 segundos de narración cada uno (a ritmo de ${WORDS_PER_MINUTE} palabras por minuto). No agregues, quites ni traduzcas contenido, solo cortá el texto en los puntos naturales, en el mismo idioma del guion original. La suma de las duraciones debe aproximarse a ${targetDurationMinutes * 60} segundos.
 
 Devolvé un objeto JSON con esta forma exacta:
 {"segments": [{"text": "...", "estimated_duration_seconds": 8}, ...]}

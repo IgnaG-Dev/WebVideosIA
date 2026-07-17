@@ -100,6 +100,7 @@ async function processGenerateScript(admin: SupabaseClient, projectId: string) {
     tone: project.tone,
     audience: project.audience,
     targetDurationMinutes: project.target_duration_minutes,
+    language: project.script_language === "en" ? "en" : "es",
   });
 
   const segments = await segmentScript({
