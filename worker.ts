@@ -4,7 +4,12 @@ config({ path: ".env.local" });
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "./src/lib/supabase/admin";
 import { generateScript, segmentScript } from "./src/lib/openai";
-import { searchMedia, downloadMedia } from "./src/lib/stock-media";
+import {
+  searchMedia,
+  downloadMedia,
+  extractKeywords,
+  extensionFromContentType,
+} from "./src/lib/stock-media";
 import { synthesizeSpeech } from "./src/lib/tts";
 import { assembleSegmentsToVideo, type SegmentAsset } from "./src/lib/ffmpeg";
 
@@ -12,40 +17,8 @@ const POLL_INTERVAL_MS = 5000;
 const SEGMENT_CONCURRENCY = 3;
 const ASSETS_BUCKET = "project-assets";
 
-const SPANISH_STOPWORDS = new Set([
-  "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "al",
-  "a", "en", "y", "o", "u", "que", "es", "son", "para", "por", "con", "su",
-  "sus", "se", "lo", "le", "les", "como", "mas", "pero", "si", "no", "ya",
-  "muy", "esto", "esta", "este", "estos", "estas", "eso", "esa", "ese",
-  "tambien", "cuando", "donde", "porque", "sobre", "entre", "hay", "ser",
-  "estar", "asi", "sin", "todo", "toda", "todos", "todas", "nos", "les",
-]);
-
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function extractKeywords(text: string, maxWords = 6): string {
-  const words = text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !SPANISH_STOPWORDS.has(w));
-
-  const keywords = words.slice(0, maxWords).join(" ");
-  return keywords || text.slice(0, 60);
-}
-
-function extensionFromContentType(contentType: string): string {
-  const map: Record<string, string> = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp",
-    "video/mp4": "mp4",
-  };
-  return map[contentType] ?? contentType.split("/")[1]?.split(";")[0] ?? "bin";
 }
 
 async function mapWithConcurrency<T, R>(
@@ -312,12 +285,13 @@ type AssemblySegmentRow = {
   media_type: "image" | "video" | null;
   image_url: string | null;
   audio_url: string | null;
+  estimated_duration_seconds: number;
 };
 
 async function processAssembly(admin: SupabaseClient, projectId: string) {
   const { data: segments, error } = await admin
     .from("segments")
-    .select("order_index, media_type, image_url, audio_url")
+    .select("order_index, media_type, image_url, audio_url, estimated_duration_seconds")
     .eq("project_id", projectId)
     .order("order_index", { ascending: true })
     .returns<AssemblySegmentRow[]>();
@@ -344,6 +318,7 @@ async function processAssembly(admin: SupabaseClient, projectId: string) {
         mediaBytes: media.bytes,
         mediaExtension: extensionFromContentType(media.contentType),
         audioBytes: audio.bytes,
+        durationSeconds: segment.estimated_duration_seconds,
       };
     },
   );

@@ -69,11 +69,24 @@ export default async function ProjectDetailPage({
         </div>
       )}
 
+      {project.status === "done" && project.video_url && (
+        <div className="flex flex-col gap-2">
+          <span className="text-sm text-foreground/60">Video final</span>
+          <video
+            controls
+            src={project.video_url}
+            className="w-full rounded-md border border-black/10"
+          />
+        </div>
+      )}
+
       {(() => {
         const hasSegments = !!segments && segments.length > 0;
         const canEdit =
           hasSegments &&
-          (project.status === "script_ready" || project.status === "error");
+          (project.status === "script_ready" ||
+            project.status === "error" ||
+            project.status === "done");
 
         if (canEdit) {
           return (
@@ -85,7 +98,9 @@ export default async function ProjectDetailPage({
                   type="submit"
                   className="self-start rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
                 >
-                  Generar video
+                  {project.status === "done"
+                    ? "Regenerar video"
+                    : "Generar video"}
                 </button>
               </form>
             </>

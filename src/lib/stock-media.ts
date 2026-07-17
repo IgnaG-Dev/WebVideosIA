@@ -146,3 +146,36 @@ export async function downloadMedia(
   const bytes = new Uint8Array(await res.arrayBuffer());
   return { bytes, contentType };
 }
+
+const SPANISH_STOPWORDS = new Set([
+  "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "al",
+  "a", "en", "y", "o", "u", "que", "es", "son", "para", "por", "con", "su",
+  "sus", "se", "lo", "le", "les", "como", "mas", "pero", "si", "no", "ya",
+  "muy", "esto", "esta", "este", "estos", "estas", "eso", "esa", "ese",
+  "tambien", "cuando", "donde", "porque", "sobre", "entre", "hay", "ser",
+  "estar", "asi", "sin", "todo", "toda", "todos", "todas", "nos", "les",
+]);
+
+/** Deriva palabras clave de búsqueda a partir del texto narrado de un segmento. */
+export function extractKeywords(text: string, maxWords = 6): string {
+  const words = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !SPANISH_STOPWORDS.has(w));
+
+  const keywords = words.slice(0, maxWords).join(" ");
+  return keywords || text.slice(0, 60);
+}
+
+export function extensionFromContentType(contentType: string): string {
+  const map: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "video/mp4": "mp4",
+  };
+  return map[contentType] ?? contentType.split("/")[1]?.split(";")[0] ?? "bin";
+}

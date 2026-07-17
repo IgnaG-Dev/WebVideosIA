@@ -19,6 +19,10 @@ export type SegmentAsset = {
   mediaBytes: Uint8Array;
   mediaExtension: string;
   audioBytes: Uint8Array;
+  // Duración máxima del clip en segundos. Si el audio dura menos, manda el
+  // audio (-shortest); si el usuario recortó la duración a un valor menor
+  // al del audio, este límite corta el clip ahí (-t).
+  durationSeconds: number;
 };
 
 function runFfmpeg(args: string[]): Promise<void> {
@@ -93,6 +97,7 @@ async function buildSegmentClip(
           "-b:a", "192k",
           "-ar", "44100",
           "-shortest",
+          "-t", String(segment.durationSeconds),
           outputPath,
         ]
       : [
@@ -111,6 +116,7 @@ async function buildSegmentClip(
           "-b:a", "192k",
           "-ar", "44100",
           "-shortest",
+          "-t", String(segment.durationSeconds),
           outputPath,
         ];
 
