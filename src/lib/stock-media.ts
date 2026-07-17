@@ -117,22 +117,28 @@ const pixabaySource: StockMediaSource = {
 const SOURCES: StockMediaSource[] = [pexelsSource, pixabaySource];
 
 /**
- * Busca contenido visual real (imagen o, si no hay, video) que coincida con
- * las palabras clave de un segmento, probando los proveedores en orden.
- * `page` permite pedir un resultado distinto al de una búsqueda anterior
- * con las mismas palabras clave (ver `searchDifferentMedia`).
+ * Busca contenido visual real que coincida con las palabras clave de un
+ * segmento, probando los proveedores en orden. `preferredType` decide si se
+ * intenta primero imagen o video (si no hay resultados de ese tipo, cae al
+ * otro). `page` permite pedir un resultado distinto al de una búsqueda
+ * anterior con las mismas palabras clave (ver `searchDifferentMedia`).
  */
 export async function searchMedia(
   keywords: string,
-  page = 1,
+  options?: { page?: number; preferredType?: MediaType },
 ): Promise<StockMediaResult | null> {
-  for (const source of SOURCES) {
-    const image = await source.searchImage(keywords, page);
-    if (image) return image;
-  }
-  for (const source of SOURCES) {
-    const video = await source.searchVideo(keywords, page);
-    if (video) return video;
+  const page = options?.page ?? 1;
+  const typeOrder: MediaType[] =
+    options?.preferredType === "video" ? ["video", "image"] : ["image", "video"];
+
+  for (const type of typeOrder) {
+    for (const source of SOURCES) {
+      const result =
+        type === "image"
+          ? await source.searchImage(keywords, page)
+          : await source.searchVideo(keywords, page);
+      if (result) return result;
+    }
   }
   return null;
 }
@@ -140,13 +146,14 @@ export async function searchMedia(
 /**
  * Como searchMedia, pero pide una página al azar (dentro de un rango chico)
  * para no traer siempre el mismo resultado top — pensado para "buscar otra
- * imagen" sobre un segmento que ya tiene una.
+ * imagen/video" sobre un segmento que ya tiene uno.
  */
 export async function searchDifferentMedia(
   keywords: string,
+  preferredType?: MediaType,
 ): Promise<StockMediaResult | null> {
   const page = 1 + Math.floor(Math.random() * 5);
-  return searchMedia(keywords, page);
+  return searchMedia(keywords, { page, preferredType });
 }
 
 export async function downloadMedia(

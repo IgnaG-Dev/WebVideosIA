@@ -65,6 +65,29 @@ export default function NewProjectPage() {
           />
         </label>
 
+        <div className="flex flex-col gap-2 text-sm">
+          <span>Contenido visual de los segmentos</span>
+          <div className="flex gap-4">
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="media_preference"
+                value="image"
+                defaultChecked
+              />
+              Imágenes
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" name="media_preference" value="video" />
+              Videos
+            </label>
+          </div>
+          <span className="text-xs text-foreground/50">
+            Del banco de Pexels/Pixabay. Si no encuentra del tipo elegido para
+            algún segmento, usa el otro.
+          </span>
+        </div>
+
         {mode === "manual" ? (
           <label className="flex flex-col gap-1 text-sm">
             Guion completo

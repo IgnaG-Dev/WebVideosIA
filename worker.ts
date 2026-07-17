@@ -9,6 +9,7 @@ import {
   downloadMedia,
   extractKeywords,
   extensionFromContentType,
+  type MediaType,
 } from "./src/lib/stock-media";
 import { synthesizeSpeech } from "./src/lib/tts";
 import {
@@ -138,9 +139,10 @@ async function fetchAndUploadImage(
   admin: SupabaseClient,
   projectId: string,
   segment: SegmentRow,
+  preferredType: MediaType,
 ) {
   const keywords = extractKeywords(segment.text);
-  const result = await searchMedia(keywords);
+  const result = await searchMedia(keywords, { preferredType });
   if (!result) {
     throw new Error(
       `No se encontró imagen/video para las palabras clave: "${keywords}".`,
@@ -218,11 +220,12 @@ async function processSegmentMedia(
   admin: SupabaseClient,
   projectId: string,
   segment: SegmentRow,
+  preferredType: MediaType,
 ) {
   const [imageResult, audioResult] = await Promise.allSettled([
     segment.image_url
       ? Promise.resolve()
-      : fetchAndUploadImage(admin, projectId, segment),
+      : fetchAndUploadImage(admin, projectId, segment, preferredType),
     segment.audio_url
       ? Promise.resolve()
       : fetchAndUploadAudio(admin, projectId, segment),
@@ -254,6 +257,14 @@ function errorMessage(err: unknown): string {
 }
 
 async function processGenerateVideo(admin: SupabaseClient, projectId: string) {
+  const { data: project } = await admin
+    .from("projects")
+    .select("media_preference")
+    .eq("id", projectId)
+    .single();
+  const preferredType: MediaType =
+    project?.media_preference === "video" ? "video" : "image";
+
   const { data: segments, error } = await admin
     .from("segments")
     .select("id, text, image_url, audio_url")
@@ -270,7 +281,7 @@ async function processGenerateVideo(admin: SupabaseClient, projectId: string) {
     .update({ status: "generating_images" })
     .eq("id", projectId);
   await mapWithConcurrency(segments, SEGMENT_CONCURRENCY, (segment) =>
-    processSegmentMedia(admin, projectId, segment),
+    processSegmentMedia(admin, projectId, segment, preferredType),
   );
 
   const { data: finalSegments } = await admin

@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import type { DragEvent } from "react";
 import type { Segment } from "@/lib/types";
+import type { MediaType } from "@/lib/stock-media";
 import {
   updateSegmentsContent,
   reorderSegments,
@@ -97,10 +98,10 @@ export function SegmentsEditor({
     });
   }
 
-  async function handleReplaceImage(segmentId: string) {
+  async function handleReplaceImage(segmentId: string, type: MediaType) {
     setBusy(segmentId, true);
     setImageErrors((prev) => ({ ...prev, [segmentId]: "" }));
-    const result = await replaceSegmentImage(projectId, segmentId);
+    const result = await replaceSegmentImage(projectId, segmentId, type);
     if (result.error) {
       setImageErrors((prev) => ({ ...prev, [segmentId]: result.error! }));
     }
@@ -161,7 +162,14 @@ export function SegmentsEditor({
               </div>
 
               <div className="flex h-28 items-center justify-center overflow-hidden rounded-md bg-black/5">
-                {segment.image_url ? (
+                {segment.image_url && segment.media_type === "video" ? (
+                  <video
+                    src={segment.image_url}
+                    muted
+                    loop
+                    className="h-full w-full object-cover"
+                  />
+                ) : segment.image_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={segment.image_url}
@@ -179,27 +187,35 @@ export function SegmentsEditor({
               <div className="flex gap-2 text-xs">
                 <button
                   type="button"
-                  onClick={() => handleReplaceImage(id)}
+                  onClick={() => handleReplaceImage(id, "image")}
                   disabled={busy}
                   className="flex-1 rounded border border-black/10 py-1 disabled:opacity-50"
                 >
-                  {busy ? "..." : "Buscar otra"}
+                  {busy ? "..." : "Otra imagen"}
                 </button>
-                <label className="flex-1 cursor-pointer rounded border border-black/10 py-1 text-center">
-                  Subir
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    disabled={busy}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleUploadImage(id, file);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
+                <button
+                  type="button"
+                  onClick={() => handleReplaceImage(id, "video")}
+                  disabled={busy}
+                  className="flex-1 rounded border border-black/10 py-1 disabled:opacity-50"
+                >
+                  {busy ? "..." : "Otro video"}
+                </button>
               </div>
+              <label className="cursor-pointer rounded border border-black/10 py-1 text-center text-xs">
+                Subir imagen propia
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={busy}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleUploadImage(id, file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
               {imageErrors[id] && (
                 <p className="text-xs text-red-600">{imageErrors[id]}</p>
               )}

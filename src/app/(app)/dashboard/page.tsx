@@ -15,13 +15,22 @@ export default async function DashboardPage() {
   const { data: thumbnails } = projectIds.length
     ? await supabase
         .from("segments")
-        .select("project_id, image_url")
+        .select("project_id, image_url, media_type")
         .eq("order_index", 0)
         .in("project_id", projectIds)
-    : { data: [] as { project_id: string; image_url: string | null }[] };
+    : {
+        data: [] as {
+          project_id: string;
+          image_url: string | null;
+          media_type: "image" | "video" | null;
+        }[],
+      };
 
   const thumbnailByProject = new Map(
-    (thumbnails ?? []).map((t) => [t.project_id, t.image_url]),
+    (thumbnails ?? []).map((t) => [
+      t.project_id,
+      { url: t.image_url, isVideo: t.media_type === "video" },
+    ]),
   );
 
   return (
@@ -59,10 +68,16 @@ export default async function DashboardPage() {
                   className="flex items-center gap-4 rounded-lg border border-black/10 px-4 py-3 hover:bg-black/[.02]"
                 >
                   <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md bg-black/5">
-                    {thumbnail ? (
+                    {thumbnail?.url && thumbnail.isVideo ? (
+                      <video
+                        src={thumbnail.url}
+                        muted
+                        className="h-full w-full object-cover"
+                      />
+                    ) : thumbnail?.url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={thumbnail}
+                        src={thumbnail.url}
                         alt=""
                         className="h-full w-full object-cover"
                       />

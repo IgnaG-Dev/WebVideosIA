@@ -5,6 +5,7 @@ import type { Project, Segment } from "@/lib/types";
 import { deleteProject, startVideoGeneration } from "./actions";
 import { SegmentsEditor } from "./segments-editor";
 import { ProjectProgress } from "./progress";
+import { MediaPreferenceSelector } from "./media-preference-selector";
 
 export default async function ProjectDetailPage({
   params,
@@ -47,6 +48,12 @@ export default async function ProjectDetailPage({
         <div>
           <dt className="text-foreground/60">Duración objetivo</dt>
           <dd>{project.target_duration_minutes} min</dd>
+        </div>
+        <div>
+          <dt className="text-foreground/60">Contenido visual</dt>
+          <dd>
+            {project.media_preference === "video" ? "Videos" : "Imágenes"}
+          </dd>
         </div>
         <div>
           <dt className="text-foreground/60">Creado</dt>
@@ -92,6 +99,10 @@ export default async function ProjectDetailPage({
           return (
             <>
               <SegmentsEditor projectId={project.id} segments={segments!} />
+              <MediaPreferenceSelector
+                projectId={project.id}
+                mediaPreference={project.media_preference}
+              />
               <form action={startVideoGeneration}>
                 <input type="hidden" name="projectId" value={project.id} />
                 <button
@@ -145,17 +156,6 @@ export default async function ProjectDetailPage({
       })()}
 
       <ProjectProgress projectId={project.id} initialStatus={project.status} />
-
-      {project.status === "done" && project.video_url && (
-        <div className="flex flex-col gap-2">
-          <span className="text-sm text-foreground/60">Video final</span>
-          <video
-            controls
-            src={project.video_url}
-            className="w-full rounded-md border border-black/10"
-          />
-        </div>
-      )}
 
       {project.error_message && (
         <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">

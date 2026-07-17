@@ -1,5 +1,7 @@
 export type ScriptMode = "manual" | "ia";
 
+export type MediaPreference = "image" | "video";
+
 export type ProjectStatus =
   | "draft"
   | "generating_script"
@@ -41,6 +43,7 @@ export type Project = {
   script_mode: ScriptMode;
   status: ProjectStatus;
   target_duration_minutes: number;
+  media_preference: MediaPreference;
   topic: string | null;
   tone: string | null;
   audience: string | null;

@@ -10,7 +10,9 @@ import {
   downloadMedia,
   extractKeywords,
   extensionFromContentType,
+  type MediaType,
 } from "@/lib/stock-media";
+import type { MediaPreference } from "@/lib/types";
 
 const ASSETS_BUCKET = "project-assets";
 
@@ -194,10 +196,11 @@ export async function updateSegmentsContent(
 
 export type ReplaceImageState = { error: string | null };
 
-/** Busca de nuevo una imagen/video de stock para este segmento (misma keyword). */
+/** Busca de nuevo una imagen o video de stock para este segmento (misma keyword). */
 export async function replaceSegmentImage(
   projectId: string,
   segmentId: string,
+  preferredType: MediaType = "image",
 ): Promise<ReplaceImageState> {
   const supabase = await createClient();
   const {
@@ -213,9 +216,9 @@ export async function replaceSegmentImage(
   if (!segment) return { error: "Segmento no encontrado." };
 
   const keywords = extractKeywords(segment.text);
-  const result = await searchDifferentMedia(keywords);
+  const result = await searchDifferentMedia(keywords, preferredType);
   if (!result) {
-    return { error: `No se encontró una imagen nueva para "${keywords}".` };
+    return { error: `No se encontró contenido nuevo para "${keywords}".` };
   }
 
   try {
@@ -333,6 +336,24 @@ export async function startVideoGeneration(formData: FormData) {
       status: "pending",
     });
   }
+
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function updateMediaPreference(
+  projectId: string,
+  mediaPreference: MediaPreference,
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  await supabase
+    .from("projects")
+    .update({ media_preference: mediaPreference })
+    .eq("id", projectId);
 
   revalidatePath(`/projects/${projectId}`);
 }

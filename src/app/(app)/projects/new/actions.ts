@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { segmentScript } from "@/lib/openai";
-import type { ScriptMode } from "@/lib/types";
+import type { MediaPreference, ScriptMode } from "@/lib/types";
 
 export type CreateProjectState = { error: string | null };
 
@@ -26,6 +26,10 @@ export async function createProject(
   const targetDurationMinutes = Number(
     formData.get("target_duration_minutes"),
   );
+  const mediaPreference: MediaPreference =
+    String(formData.get("media_preference") ?? "") === "video"
+      ? "video"
+      : "image";
 
   if (!title) {
     return { error: "El título es obligatorio." };
@@ -65,6 +69,7 @@ export async function createProject(
         title,
         script_mode: "manual",
         target_duration_minutes: targetDurationMinutes,
+        media_preference: mediaPreference,
         full_script: fullScript,
         status: "script_ready",
       })
@@ -111,6 +116,7 @@ export async function createProject(
         title,
         script_mode: "ia",
         target_duration_minutes: targetDurationMinutes,
+        media_preference: mediaPreference,
         topic,
         tone,
         audience,
