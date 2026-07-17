@@ -19,6 +19,16 @@ export type ScriptSegment = {
 // Ritmo de narración promedio en español, usado para estimar duraciones.
 const WORDS_PER_MINUTE = 140;
 
+// Los modelos suelen quedarse cortos cuando se les pide un texto muy largo
+// en una sola respuesta. Se acepta hasta un 5% menos del objetivo; si no
+// llega, se le pide que siga escribiendo (sin repetirse) hasta acercarse.
+const MIN_WORDS_RATIO = 0.95;
+const MAX_CONTINUATIONS = 8;
+
+function countWords(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
 export async function generateScript(input: {
   topic: string;
   tone: string;
@@ -27,6 +37,7 @@ export async function generateScript(input: {
 }): Promise<string> {
   const { topic, tone, audience, targetDurationMinutes } = input;
   const targetWords = Math.round(targetDurationMinutes * WORDS_PER_MINUTE);
+  const minWords = Math.round(targetWords * MIN_WORDS_RATIO);
 
   const completion = await getClient().chat.completions.create({
     model: "gpt-4o-mini",
@@ -35,24 +46,77 @@ export async function generateScript(input: {
       {
         role: "system",
         content:
-          "Sos un guionista profesional de videos narrados. Escribís guiones completos, listos para narrar en voz alta, sin acotaciones de escena ni marcas de tiempo — solo el texto que se lee.",
+          "Sos un guionista profesional de videos narrados. Escribís guiones completos, listos para narrar en voz alta, sin acotaciones de escena ni marcas de tiempo — solo el texto que se lee. Cuando te piden una extensión larga, la cumplís desarrollando el tema en profundidad (ejemplos, contexto, subtemas) en vez de quedarte corto.",
       },
       {
         role: "user",
         content: `Escribí el guion completo de un video sobre "${topic}".
 Tono: ${tone}.
 Público objetivo: ${audience}.
-Duración objetivo: ${targetDurationMinutes} minutos (aproximadamente ${targetWords} palabras).
+Duración objetivo: ${targetDurationMinutes} minutos. Tiene que tener **como mínimo ${targetWords} palabras** (a ritmo de ${WORDS_PER_MINUTE} palabras por minuto) — es muy importante que no quede corto, desarrollá el tema con la profundidad necesaria para llegar a esa extensión.
 Devolvé únicamente el texto del guion, en español, sin títulos ni numeración.`,
       },
     ],
   });
 
-  const script = completion.choices[0]?.message?.content?.trim();
+  let script = completion.choices[0]?.message?.content?.trim();
   if (!script) {
     throw new Error("OpenAI no devolvió contenido para el guion.");
   }
+
+  let attempts = 0;
+  while (countWords(script) < minWords && attempts < MAX_CONTINUATIONS) {
+    const missingWords = targetWords - countWords(script);
+    const continuation = await requestScriptContinuation({
+      scriptSoFar: script,
+      topic,
+      tone,
+      audience,
+      missingWords,
+    });
+    script = `${script}\n\n${continuation}`.trim();
+    attempts++;
+  }
+
   return script;
+}
+
+async function requestScriptContinuation(input: {
+  scriptSoFar: string;
+  topic: string;
+  tone: string;
+  audience: string;
+  missingWords: number;
+}): Promise<string> {
+  const { scriptSoFar, topic, tone, audience, missingWords } = input;
+
+  const completion = await getClient().chat.completions.create({
+    model: "gpt-4o-mini",
+    temperature: 0.8,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Continuás guiones de video ya empezados. Seguís el mismo tono y estilo, sin repetir ideas ya dichas y sin resumir lo anterior — solo agregás contenido nuevo que continúa naturalmente donde terminó el texto.",
+      },
+      {
+        role: "user",
+        content: `Este guion sobre "${topic}" (tono: ${tone}, público: ${audience}) quedó corto. Continualo desde donde termina, agregando contenido nuevo y relevante (no repitas nada de lo ya escrito) hasta sumar aproximadamente ${missingWords} palabras más.
+Devolvé únicamente el texto que continúa, en español, sin repetir el guion anterior.
+
+Guion hasta ahora:
+"""
+${scriptSoFar}
+"""`,
+      },
+    ],
+  });
+
+  const continuation = completion.choices[0]?.message?.content?.trim();
+  if (!continuation) {
+    throw new Error("OpenAI no devolvió la continuación del guion.");
+  }
+  return continuation;
 }
 
 export async function segmentScript(input: {

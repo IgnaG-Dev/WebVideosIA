@@ -214,28 +214,6 @@ export function SegmentsEditor({
                 rows={3}
                 className="rounded-md border border-black/10 px-2 py-1 text-xs"
               />
-
-              {segment.audio_url ? (
-                <span className="text-xs text-foreground/60">
-                  Duración: {row.estimated_duration_seconds}s (la marca el
-                  audio)
-                </span>
-              ) : (
-                <label className="flex items-center gap-2 text-xs text-foreground/60">
-                  Duración estimada (s)
-                  <input
-                    type="number"
-                    min={1}
-                    value={row.estimated_duration_seconds}
-                    onChange={(e) =>
-                      updateRow(id, {
-                        estimated_duration_seconds: Number(e.target.value),
-                      })
-                    }
-                    className="w-16 rounded-md border border-black/10 px-2 py-1"
-                  />
-                </label>
-              )}
             </div>
           );
         })}

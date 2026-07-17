@@ -125,9 +125,6 @@ export default async function ProjectDetailPage({
                     <p className="flex-1 whitespace-pre-wrap">
                       {segment.text}
                     </p>
-                    <span className="shrink-0 text-xs text-foreground/50">
-                      {segment.estimated_duration_seconds}s
-                    </span>
                   </li>
                 ))}
               </ol>
