@@ -3,20 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import type { DragEvent } from "react";
 import type { Segment, SegmentAnimation, SegmentTransition } from "@/lib/types";
-import type { MediaType } from "@/lib/stock-media";
-import {
-  updateSegmentsContent,
-  reorderSegments,
-  replaceSegmentImage,
-  uploadSegmentImage,
-  generateSegmentImageWithGemini,
-  updateSegmentAnimation,
-  updateSegmentTransition,
-  applyAnimationToAllSegments,
-  applyTransitionToAllSegments,
-} from "./actions";
-
-type Row = { id: string; text: string; estimated_duration_seconds: number };
+import { reorderSegments } from "./actions";
 
 const ANIMATION_LABELS: Record<SegmentAnimation, string> = {
   none: "Sin animación",
@@ -28,13 +15,14 @@ const ANIMATION_LABELS: Record<SegmentAnimation, string> = {
   pan_down: "Paneo hacia abajo",
 };
 
-const ANIMATION_OPTIONS = Object.keys(ANIMATION_LABELS) as SegmentAnimation[];
-
 const TRANSITION_LABELS: Record<SegmentTransition, string> = {
   cut: "Corte directo",
   crossfade: "Crossfade",
 };
 
+// Editor de solo reordenar: el contenido de cada segmento (imagen/video,
+// texto, animación, transición) se define al generar el guion y no se
+// puede editar acá — lo único que el usuario puede cambiar es el orden.
 export function SegmentsEditor({
   projectId,
   segments,
@@ -42,21 +30,8 @@ export function SegmentsEditor({
   projectId: string;
   segments: Segment[];
 }) {
-  const [rows, setRows] = useState<Row[]>(
-    segments.map((s) => ({
-      id: s.id,
-      text: s.text,
-      estimated_duration_seconds: s.estimated_duration_seconds,
-    })),
-  );
   const [order, setOrder] = useState<string[]>(segments.map((s) => s.id));
-  const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
-  const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
-  const [bulkAnimation, setBulkAnimation] = useState<SegmentAnimation>("zoom_in");
-  const [bulkTransition, setBulkTransition] = useState<SegmentTransition>("crossfade");
+  const [, startTransition] = useTransition();
   const dragIndexRef = useRef<number | null>(null);
 
   // El orden mostrado sigue a la prop (fuente de verdad del servidor) salvo
@@ -71,38 +46,6 @@ export function SegmentsEditor({
   }
 
   const segmentById = new Map(segments.map((s) => [s.id, s]));
-
-  // Para la muestra en "Aplicar a todos" alcanza con cualquier imagen o
-  // video que ya tenga un segmento (no importa cuál) — si no hay ninguno
-  // todavía, se muestra un cuadro de color como placeholder.
-  const previewSegment = segments.find((s) => s.image_url) ?? null;
-  const previewIsVideo = previewSegment?.media_type === "video";
-
-  function updateRow(id: string, patch: Partial<Row>) {
-    setSaved(false);
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  }
-
-  function setBusy(id: string, busy: boolean) {
-    setBusyIds((prev) => {
-      const next = new Set(prev);
-      if (busy) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }
-
-  function handleSave() {
-    setError(null);
-    startTransition(async () => {
-      const result = await updateSegmentsContent(projectId, rows);
-      if (result.error) {
-        setError(result.error);
-      } else {
-        setSaved(true);
-      }
-    });
-  }
 
   function handleDragStart(index: number) {
     dragIndexRef.current = index;
@@ -128,64 +71,8 @@ export function SegmentsEditor({
     });
   }
 
-  async function handleReplaceImage(segmentId: string, type: MediaType) {
-    setBusy(segmentId, true);
-    setImageErrors((prev) => ({ ...prev, [segmentId]: "" }));
-    const result = await replaceSegmentImage(projectId, segmentId, type);
-    if (result.error) {
-      setImageErrors((prev) => ({ ...prev, [segmentId]: result.error! }));
-    }
-    setBusy(segmentId, false);
-  }
-
-  async function handleGenerateWithGemini(segmentId: string) {
-    setBusy(segmentId, true);
-    setImageErrors((prev) => ({ ...prev, [segmentId]: "" }));
-    const result = await generateSegmentImageWithGemini(projectId, segmentId);
-    if (result.error) {
-      setImageErrors((prev) => ({ ...prev, [segmentId]: result.error! }));
-    }
-    setBusy(segmentId, false);
-  }
-
-  async function handleUploadImage(segmentId: string, file: File) {
-    setBusy(segmentId, true);
-    setImageErrors((prev) => ({ ...prev, [segmentId]: "" }));
-    const formData = new FormData();
-    formData.append("file", file);
-    const result = await uploadSegmentImage(projectId, segmentId, formData);
-    if (result.error) {
-      setImageErrors((prev) => ({ ...prev, [segmentId]: result.error! }));
-    }
-    setBusy(segmentId, false);
-  }
-
-  function handleAnimationChange(segmentId: string, animation: SegmentAnimation) {
-    startTransition(async () => {
-      await updateSegmentAnimation(projectId, segmentId, animation);
-    });
-  }
-
-  function handleTransitionChange(segmentId: string, transition: SegmentTransition) {
-    startTransition(async () => {
-      await updateSegmentTransition(projectId, segmentId, transition);
-    });
-  }
-
-  function handleApplyAnimationToAll() {
-    startTransition(async () => {
-      await applyAnimationToAllSegments(projectId, bulkAnimation);
-    });
-  }
-
-  function handleApplyTransitionToAll() {
-    startTransition(async () => {
-      await applyTransitionToAllSegments(projectId, bulkTransition);
-    });
-  }
-
-  const totalSeconds = rows.reduce(
-    (acc, r) => acc + (Number(r.estimated_duration_seconds) || 0),
+  const totalSeconds = segments.reduce(
+    (acc, s) => acc + (Number(s.estimated_duration_seconds) || 0),
     0,
   );
 
@@ -201,96 +88,10 @@ export function SegmentsEditor({
         </span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-md bg-black/5 px-3 py-2 text-xs">
-        <div className="flex h-20 w-32 shrink-0 items-center justify-center overflow-hidden rounded-md bg-black/10">
-          {previewSegment && previewIsVideo ? (
-            <video
-              key={previewSegment.id}
-              src={previewSegment.image_url!}
-              muted
-              loop
-              autoPlay
-              className="h-full w-full object-cover"
-            />
-          ) : previewSegment ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={`${previewSegment.id}-${bulkAnimation}`}
-              src={previewSegment.image_url!}
-              alt="Muestra de animación"
-              className={`h-full w-full object-cover ${
-                bulkAnimation !== "none" ? `kb-preview-${bulkAnimation}` : ""
-              }`}
-            />
-          ) : (
-            <div
-              key={bulkAnimation}
-              className={`h-full w-full bg-gradient-to-br from-indigo-400 to-fuchsia-500 ${
-                bulkAnimation !== "none" ? `kb-preview-${bulkAnimation}` : ""
-              }`}
-            />
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-foreground/60">Aplicar a todos:</span>
-          <select
-            value={bulkAnimation}
-            onChange={(e) => setBulkAnimation(e.target.value as SegmentAnimation)}
-            className="rounded border border-black/10 bg-white px-1 py-0.5 text-black"
-          >
-            {ANIMATION_OPTIONS.map((a) => (
-              <option key={a} value={a}>
-                {ANIMATION_LABELS[a]}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={handleApplyAnimationToAll}
-            disabled={isPending}
-            className="rounded border border-black/10 px-2 py-0.5 disabled:opacity-50"
-          >
-            Aplicar animación
-          </button>
-          <select
-            value={bulkTransition}
-            onChange={(e) => setBulkTransition(e.target.value as SegmentTransition)}
-            className="rounded border border-black/10 bg-white px-1 py-0.5 text-black"
-          >
-            {(Object.keys(TRANSITION_LABELS) as SegmentTransition[]).map((t) => (
-              <option key={t} value={t}>
-                {TRANSITION_LABELS[t]}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={handleApplyTransitionToAll}
-            disabled={isPending}
-            className="rounded border border-black/10 px-2 py-0.5 disabled:opacity-50"
-          >
-            Aplicar transición
-          </button>
-          {previewIsVideo && (
-            <span className="w-full text-foreground/50">
-              Los segmentos de video se muestran tal cual (la animación solo
-              aplica a imágenes).
-            </span>
-          )}
-        </div>
-      </div>
-
       <div className="flex gap-3 overflow-x-auto pb-2">
         {order.map((id, index) => {
           const segment = segmentById.get(id);
-          const row = rows.find((r) => r.id === id);
-          if (!segment || !row) return null;
-          const busy = busyIds.has(id);
-          const previewClass =
-            segment.media_type !== "video" && segment.animation !== "none"
-              ? `kb-preview-${segment.animation}`
-              : "";
+          if (!segment) return null;
 
           return (
             <div
@@ -323,7 +124,7 @@ export function SegmentsEditor({
                     src={segment.image_url}
                     alt=""
                     draggable={false}
-                    className={`h-full w-full object-cover ${previewClass}`}
+                    className="h-full w-full object-cover"
                   />
                 ) : (
                   <span className="text-xs text-foreground/30">
@@ -332,117 +133,24 @@ export function SegmentsEditor({
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-1 text-xs">
-                <button
-                  type="button"
-                  onClick={() => handleReplaceImage(id, "image")}
-                  disabled={busy}
-                  className="rounded border border-black/10 py-1 disabled:opacity-50"
-                >
-                  {busy ? "..." : "Imagen"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleReplaceImage(id, "video")}
-                  disabled={busy}
-                  className="rounded border border-black/10 py-1 disabled:opacity-50"
-                >
-                  {busy ? "..." : "Video"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleGenerateWithGemini(id)}
-                  disabled={busy}
-                  className="rounded border border-black/10 py-1 disabled:opacity-50"
-                >
-                  {busy ? "..." : "IA"}
-                </button>
+              <div className="flex flex-col gap-0.5 text-xs text-foreground/50">
+                <span>Animación: {ANIMATION_LABELS[segment.animation]}</span>
+                {index > 0 && (
+                  <span>Entrada: {TRANSITION_LABELS[segment.transition]}</span>
+                )}
               </div>
-              <label className="cursor-pointer rounded border border-black/10 py-1 text-center text-xs">
-                Subir imagen propia
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  disabled={busy}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleUploadImage(id, file);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-              {imageErrors[id] && (
-                <p className="text-xs text-red-600">{imageErrors[id]}</p>
-              )}
-
-              <label className="flex items-center gap-1 text-xs text-foreground/60">
-                Animación
-                <select
-                  value={segment.animation}
-                  disabled={segment.media_type === "video"}
-                  onChange={(e) =>
-                    handleAnimationChange(id, e.target.value as SegmentAnimation)
-                  }
-                  className="flex-1 rounded border border-black/10 bg-white px-1 py-0.5 text-black disabled:opacity-50"
-                >
-                  {ANIMATION_OPTIONS.map((a) => (
-                    <option key={a} value={a}>
-                      {ANIMATION_LABELS[a]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              {index > 0 && (
-                <label className="flex items-center gap-1 text-xs text-foreground/60">
-                  Entrada
-                  <select
-                    value={segment.transition}
-                    onChange={(e) =>
-                      handleTransitionChange(id, e.target.value as SegmentTransition)
-                    }
-                    className="flex-1 rounded border border-black/10 bg-white px-1 py-0.5 text-black"
-                  >
-                    {(Object.keys(TRANSITION_LABELS) as SegmentTransition[]).map(
-                      (t) => (
-                        <option key={t} value={t}>
-                          {TRANSITION_LABELS[t]}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </label>
-              )}
 
               {segment.audio_url && (
                 <audio controls src={segment.audio_url} className="h-8 w-full" />
               )}
 
-              <textarea
-                value={row.text}
-                onChange={(e) => updateRow(id, { text: e.target.value })}
-                rows={3}
-                className="rounded-md border border-black/10 px-2 py-1 text-xs"
-              />
+              <p className="rounded-md border border-black/10 px-2 py-1 text-xs text-foreground/80">
+                {segment.text}
+              </p>
             </div>
           );
         })}
       </div>
-
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {saved && !isPending && (
-        <p className="text-sm text-green-600">Cambios guardados.</p>
-      )}
-
-      <button
-        type="button"
-        onClick={handleSave}
-        disabled={isPending}
-        className="self-start rounded-md border border-black/10 px-4 py-2 text-sm font-medium disabled:opacity-60"
-      >
-        {isPending ? "Guardando..." : "Guardar cambios"}
-      </button>
     </div>
   );
 }
