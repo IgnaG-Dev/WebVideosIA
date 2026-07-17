@@ -58,25 +58,44 @@ type JobRow = {
   attempts: number;
 };
 
-async function claimNextJob(admin: SupabaseClient): Promise<JobRow | null> {
-  const { data: candidates } = await admin
+// Si el worker se cae o se reinicia (ej. redeploy) mientras procesa un job,
+// ese job queda en 'processing' para siempre — nadie más lo vuelve a tomar.
+// Se considera "huérfano" uno que lleva más de este tiempo sin actualizarse.
+const STALE_PROCESSING_MS = 15 * 60 * 1000;
+
+async function tryClaim(
+  admin: SupabaseClient,
+  fromStatus: "pending" | "processing",
+  staleMs?: number,
+): Promise<JobRow | null> {
+  let query = admin
     .from("job_queue")
     .select("id")
-    .eq("status", "pending")
+    .eq("status", fromStatus)
     .order("created_at", { ascending: true })
     .limit(1);
+  if (staleMs !== undefined) {
+    query = query.lt("updated_at", new Date(Date.now() - staleMs).toISOString());
+  }
 
+  const { data: candidates } = await query;
   if (!candidates || candidates.length === 0) return null;
 
   const { data: claimed } = await admin
     .from("job_queue")
     .update({ status: "processing" })
     .eq("id", candidates[0].id)
-    .eq("status", "pending")
+    .eq("status", fromStatus)
     .select("id, project_id, task_type, attempts")
     .maybeSingle<JobRow>();
 
   return claimed ?? null;
+}
+
+async function claimNextJob(admin: SupabaseClient): Promise<JobRow | null> {
+  const pending = await tryClaim(admin, "pending");
+  if (pending) return pending;
+  return tryClaim(admin, "processing", STALE_PROCESSING_MS);
 }
 
 // ---------------------------------------------------------------------------

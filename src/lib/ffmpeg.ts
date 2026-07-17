@@ -28,18 +28,37 @@ export type SegmentAsset = {
   transition: SegmentTransition;
 };
 
+// Igual que con los fetch externos: un proceso hijo que nunca termina (ej.
+// ffmpeg colgado con un input corrupto) deja la promesa esperando para
+// siempre y traba el job. Se fuerza un límite duro con SIGKILL.
+const FFMPEG_TIMEOUT_MS = 10 * 60 * 1000;
+const FFPROBE_TIMEOUT_MS = 30 * 1000;
+
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill("SIGKILL");
+    }, FFMPEG_TIMEOUT_MS);
     proc.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
     proc.on("error", (err) => {
+      clearTimeout(timer);
       reject(new Error(`No se pudo ejecutar ffmpeg: ${err.message}`));
     });
     proc.on("close", (code) => {
-      if (code === 0) {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(
+          new Error(
+            `ffmpeg superó los ${FFMPEG_TIMEOUT_MS / 1000}s y se canceló.`,
+          ),
+        );
+      } else if (code === 0) {
         resolve();
       } else {
         reject(new Error(`ffmpeg terminó con código ${code}: ${stderr.slice(-2000)}`));
@@ -53,6 +72,11 @@ function runFfprobe(args: string[]): Promise<string> {
     const proc = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill("SIGKILL");
+    }, FFPROBE_TIMEOUT_MS);
     proc.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });
@@ -60,10 +84,18 @@ function runFfprobe(args: string[]): Promise<string> {
       stderr += chunk.toString();
     });
     proc.on("error", (err) => {
+      clearTimeout(timer);
       reject(new Error(`No se pudo ejecutar ffprobe: ${err.message}`));
     });
     proc.on("close", (code) => {
-      if (code === 0) {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(
+          new Error(
+            `ffprobe superó los ${FFPROBE_TIMEOUT_MS / 1000}s y se canceló.`,
+          ),
+        );
+      } else if (code === 0) {
         resolve(stdout.trim());
       } else {
         reject(new Error(`ffprobe terminó con código ${code}: ${stderr.slice(-2000)}`));
