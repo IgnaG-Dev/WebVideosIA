@@ -60,6 +60,7 @@ export type Project = {
   target_duration_minutes: number;
   media_preference: MediaPreference;
   script_language: ScriptLanguage;
+  subtitles_enabled: boolean;
   topic: string | null;
   tone: string | null;
   audience: string | null;

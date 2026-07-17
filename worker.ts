@@ -353,6 +353,7 @@ async function processGenerateVideo(admin: SupabaseClient, projectId: string) {
 
 type AssemblySegmentRow = {
   order_index: number;
+  text: string;
   media_type: "image" | "video" | null;
   image_url: string | null;
   audio_url: string | null;
@@ -361,9 +362,15 @@ type AssemblySegmentRow = {
 };
 
 async function processAssembly(admin: SupabaseClient, projectId: string) {
+  const { data: project } = await admin
+    .from("projects")
+    .select("subtitles_enabled")
+    .eq("id", projectId)
+    .single();
+
   const { data: segments, error } = await admin
     .from("segments")
-    .select("order_index, media_type, image_url, audio_url, animation, transition")
+    .select("order_index, text, media_type, image_url, audio_url, animation, transition")
     .eq("project_id", projectId)
     .order("order_index", { ascending: true })
     .returns<AssemblySegmentRow[]>();
@@ -392,11 +399,14 @@ async function processAssembly(admin: SupabaseClient, projectId: string) {
         audioBytes: audio.bytes,
         animation: segment.animation,
         transition: segment.transition,
+        text: segment.text,
       };
     },
   );
 
-  const finalVideoBytes = await assembleSegmentsToVideo(assets);
+  const finalVideoBytes = await assembleSegmentsToVideo(assets, {
+    subtitlesEnabled: project?.subtitles_enabled === true,
+  });
 
   const finalPath = `${projectId}/final/video.mp4`;
   const { error: uploadError } = await admin.storage

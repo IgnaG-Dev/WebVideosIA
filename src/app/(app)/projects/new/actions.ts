@@ -31,6 +31,7 @@ export async function createProject(
     mediaPreferenceRaw === "video" || mediaPreferenceRaw === "gemini"
       ? mediaPreferenceRaw
       : "image";
+  const subtitlesEnabled = formData.get("subtitles_enabled") === "on";
 
   if (!title) {
     return { error: "El título es obligatorio." };
@@ -71,6 +72,7 @@ export async function createProject(
         script_mode: "manual",
         target_duration_minutes: targetDurationMinutes,
         media_preference: mediaPreference,
+        subtitles_enabled: subtitlesEnabled,
         full_script: fullScript,
         status: "script_ready",
       })
@@ -120,6 +122,7 @@ export async function createProject(
         script_mode: "ia",
         target_duration_minutes: targetDurationMinutes,
         media_preference: mediaPreference,
+        subtitles_enabled: subtitlesEnabled,
         script_language: scriptLanguage,
         topic,
         tone,

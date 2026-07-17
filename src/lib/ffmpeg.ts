@@ -26,6 +26,13 @@ export type SegmentAsset = {
   // Transición con la que este segmento entra desde el anterior (se ignora
   // en el primer segmento, no hay nada antes).
   transition: SegmentTransition;
+  // Texto narrado del segmento — solo se usa para el subtítulo (si está
+  // activado), no afecta el audio ni la imagen.
+  text: string;
+};
+
+export type AssembleOptions = {
+  subtitlesEnabled?: boolean;
 };
 
 // Igual que con los fetch externos: un proceso hijo que nunca termina (ej.
@@ -132,6 +139,35 @@ export async function getAudioDurationSeconds(
   }
 }
 
+// Corre tareas con concurrencia acotada — se usa para renderizar los clips
+// de cada segmento en paralelo (aprovechar varios núcleos) sin lanzar todos
+// los procesos de ffmpeg a la vez.
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let index = 0;
+  async function worker() {
+    while (index < items.length) {
+      const current = index++;
+      results[current] = await task(items[current], current);
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () =>
+    worker(),
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+// Cuántos clips se renderizan en paralelo: el paso caro es zoompan sobre
+// una imagen escalada, y cada proceso de ffmpeg ya usa varios threads para
+// codificar — un worker por cada 2 núcleos evita saturar la CPU de
+// contención en vez de ganar velocidad.
+const CLIP_CONCURRENCY = Math.max(2, Math.floor(THREADS / 2));
+
 /**
  * Filtro de video para un segmento. Sin animación (o si es un clip de
  * video, que ya tiene movimiento propio) solo escala/rellena al tamaño de
@@ -189,17 +225,120 @@ function buildVideoFilter(
 }
 
 /**
- * Arma el video final en un único proceso de ffmpeg con el filtro `concat`
- * (no el demuxer + archivos intermedios — ver historial: concatenar
- * archivos ya codificados arrastra desfasajes de audio/video que se
- * acumulan). Cada segmento se decodifica y se procesa (escala + animación
- * Ken Burns opcional) dentro del mismo grafo de filtros, y los cortes entre
- * segmentos son un `concat` directo o un `xfade`/`acrossfade` (crossfade)
- * según `segment.transition`. Devuelve los bytes del mp4 resultante; quien
- * llama es responsable de subirlos a Storage.
+ * Renderiza el clip de un solo segmento (escala + Ken Burns si aplica) a un
+ * mp4 sin audio, con duración exacta. Es el paso caro (zoompan sobre una
+ * imagen grande) — se corre en paralelo entre segmentos vía
+ * mapWithConcurrency, en vez de en serie dentro de un único proceso de
+ * ffmpeg como antes, que era el cuello de botella del armado final.
+ */
+async function renderSegmentClip(
+  workDir: string,
+  index: number,
+  segment: SegmentAsset,
+  durationSeconds: number,
+): Promise<string> {
+  const mediaPath = path.join(
+    workDir,
+    `segment-${index}-media.${segment.mediaExtension}`,
+  );
+  await writeFile(mediaPath, segment.mediaBytes);
+
+  const inputArgs: string[] = [];
+  if (segment.mediaType === "video") {
+    inputArgs.push(
+      "-stream_loop", "-1",
+      "-t", durationSeconds.toFixed(3),
+      "-i", mediaPath,
+    );
+  } else if (segment.animation !== "none") {
+    // Sin -t acá a propósito: ver buildVideoFilter.
+    inputArgs.push("-loop", "1", "-i", mediaPath);
+  } else {
+    inputArgs.push(
+      "-loop", "1",
+      "-t", durationSeconds.toFixed(3),
+      "-i", mediaPath,
+    );
+  }
+
+  const clipPath = path.join(workDir, `segment-${index}-clip.mp4`);
+  await runFfmpeg([
+    "-y",
+    ...inputArgs,
+    "-vf", buildVideoFilter(segment.animation, segment.mediaType, durationSeconds),
+    "-an",
+    "-r", String(FPS),
+    "-c:v", "libx264",
+    "-preset", "ultrafast",
+    "-crf", "18",
+    "-threads", "2",
+    "-pix_fmt", "yuv420p",
+    clipPath,
+  ]);
+
+  return clipPath;
+}
+
+function pad(n: number, width: number): string {
+  return String(n).padStart(width, "0");
+}
+
+function formatSrtTime(totalSeconds: number): string {
+  const ms = Math.max(0, Math.round(totalSeconds * 1000));
+  const hh = Math.floor(ms / 3_600_000);
+  const mm = Math.floor((ms % 3_600_000) / 60_000);
+  const ss = Math.floor((ms % 60_000) / 1000);
+  const mmm = ms % 1000;
+  return `${pad(hh, 2)}:${pad(mm, 2)}:${pad(ss, 2)},${pad(mmm, 3)}`;
+}
+
+/**
+ * Arma el .srt con un cue por segmento, en los tiempos reales que ese
+ * segmento ocupa en la línea de tiempo final (`starts`/`durations`, que ya
+ * contemplan el solapamiento de los crossfade) — así el subtítulo queda
+ * siempre sincronizado con el audio que se está narrando.
+ */
+function buildSrt(
+  segments: SegmentAsset[],
+  starts: number[],
+  durations: number[],
+): string {
+  return segments
+    .map((segment, i) => {
+      const text = segment.text.replace(/\s+/g, " ").trim();
+      if (!text) return "";
+      const start = formatSrtTime(starts[i]);
+      const end = formatSrtTime(starts[i] + durations[i]);
+      return `${i + 1}\n${start} --> ${end}\n${text}\n`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+// Escapa el path para usarlo dentro del argumento del filtro `subtitles=`,
+// que además de la sintaxis de filtro de ffmpeg interpreta ":" como
+// separador de opciones.
+function escapeSubtitlesPath(filePath: string): string {
+  return filePath.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\\'");
+}
+
+const SUBTITLE_STYLE =
+  "FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=0,MarginV=40,Alignment=2";
+
+/**
+ * Arma el video final. Primero renderiza el clip (escala + Ken Burns) de
+ * cada segmento EN PARALELO (ver renderSegmentClip) — es la parte cara de
+ * la CPU y antes se hacía en serie dentro de un único proceso de ffmpeg.
+ * Después, un único paso final liviano concatena/cruza esos clips ya
+ * renderizados y el audio crudo de cada segmento en un solo filter_complex
+ * (igual que antes: el audio se decodifica y se une en un solo proceso
+ * para no arrastrar el desfasaje que causa concatenar archivos de audio ya
+ * codificados por separado), quema los subtítulos si están activados, y
+ * codifica una sola vez. Devuelve los bytes del mp4 resultante.
  */
 export async function assembleSegmentsToVideo(
   segments: SegmentAsset[],
+  options: AssembleOptions = {},
 ): Promise<Uint8Array> {
   if (segments.length === 0) {
     throw new Error("No hay segmentos para armar el video.");
@@ -207,67 +346,45 @@ export async function assembleSegmentsToVideo(
 
   const workDir = await mkdtemp(path.join(tmpdir(), "video-ia-"));
   try {
-    const inputArgs: string[] = [];
+    // 1) Audio crudo a disco + duración real de cada segmento (rápido,
+    // solo lee metadata — se hace con concurrencia amplia).
+    const durations = await mapWithConcurrency(segments, 8, async (segment, i) => {
+      const audioPath = path.join(workDir, `segment-${i}-audio.mp3`);
+      await writeFile(audioPath, segment.audioBytes);
+      return probeDurationSeconds(audioPath);
+    });
+    const audioPaths = segments.map((_, i) =>
+      path.join(workDir, `segment-${i}-audio.mp3`),
+    );
+
+    // 2) El paso caro, en paralelo: un clip (mp4 sin audio, ya con Ken
+    // Burns si corresponde) por segmento.
+    const clipPaths = await mapWithConcurrency(
+      segments,
+      CLIP_CONCURRENCY,
+      (segment, i) => renderSegmentClip(workDir, i, segment, durations[i]),
+    );
+
+    // 3) Paso final liviano: concatena/cruza los clips ya renderizados
+    // (video) y el audio crudo (audio) en un solo filter_complex, y
+    // calcula en el camino en qué momento de la línea de tiempo final
+    // empieza cada segmento (para los subtítulos).
     const filterLines: string[] = [];
     const videoLabels: string[] = [];
     const audioLabels: string[] = [];
-    const durations: number[] = [];
+    const starts: number[] = [0];
 
     for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      const mediaPath = path.join(
-        workDir,
-        `segment-${i}-media.${segment.mediaExtension}`,
-      );
-      const audioPath = path.join(workDir, `segment-${i}-audio.mp3`);
-      await writeFile(mediaPath, segment.mediaBytes);
-      await writeFile(audioPath, segment.audioBytes);
-
-      const duration = await probeDurationSeconds(audioPath);
-      durations.push(duration);
-
-      const videoInputIndex = i * 2;
-      const audioInputIndex = videoInputIndex + 1;
-
-      if (segment.mediaType === "video") {
-        inputArgs.push(
-          "-stream_loop", "-1",
-          "-t", duration.toFixed(3),
-          "-i", mediaPath,
-        );
-      } else if (segment.animation !== "none") {
-        // Sin -t acá a propósito: con zoompan, ponerle -t al -loop 1
-        // termina multiplicando frames (cada frame del loop dispara su
-        // propio ciclo de zoompan). El corte exacto lo hace el
-        // trim=duration= dentro del filtro (ver buildVideoFilter).
-        inputArgs.push("-loop", "1", "-i", mediaPath);
-      } else {
-        inputArgs.push(
-          "-loop", "1",
-          "-t", duration.toFixed(3),
-          "-i", mediaPath,
-        );
-      }
-      inputArgs.push("-i", audioPath);
-
       const vLabel = `v${i}`;
       const aLabel = `a${i}`;
-      const videoFilter = buildVideoFilter(
-        segment.animation,
-        segment.mediaType,
-        duration,
-      );
-      filterLines.push(`[${videoInputIndex}:v]${videoFilter}[${vLabel}]`);
+      filterLines.push(`[${i}:v]setsar=1[${vLabel}]`);
       filterLines.push(
-        `[${audioInputIndex}:a]aresample=44100,asetpts=PTS-STARTPTS[${aLabel}]`,
+        `[${segments.length + i}:a]aresample=44100,asetpts=PTS-STARTPTS[${aLabel}]`,
       );
       videoLabels.push(vLabel);
       audioLabels.push(aLabel);
     }
 
-    // Encadena los segmentos de a uno: corte duro (concat) o crossfade
-    // (xfade + acrossfade), según la transición con la que entra cada
-    // segmento desde el anterior.
     let combinedV = videoLabels[0];
     let combinedA = audioLabels[0];
     let combinedDuration = durations[0];
@@ -289,11 +406,13 @@ export async function assembleSegmentsToVideo(
         filterLines.push(
           `[${combinedA}][${audioLabels[i]}]acrossfade=d=${TRANSITION_SECONDS}[${nextA}]`,
         );
+        starts.push(combinedDuration - TRANSITION_SECONDS);
         combinedDuration = combinedDuration + durations[i] - TRANSITION_SECONDS;
       } else {
         filterLines.push(
           `[${combinedV}][${combinedA}][${videoLabels[i]}][${audioLabels[i]}]concat=n=2:v=1:a=1[${nextV}][${nextA}]`,
         );
+        starts.push(combinedDuration);
         combinedDuration = combinedDuration + durations[i];
       }
 
@@ -301,15 +420,29 @@ export async function assembleSegmentsToVideo(
       combinedA = nextA;
     }
 
+    let finalVideoLabel = combinedV;
+    if (options.subtitlesEnabled) {
+      const srtPath = path.join(workDir, "subs.srt");
+      await writeFile(srtPath, buildSrt(segments, starts, durations), "utf-8");
+      filterLines.push(
+        `[${combinedV}]subtitles=${escapeSubtitlesPath(srtPath)}:force_style='${SUBTITLE_STYLE}'[subbed]`,
+      );
+      finalVideoLabel = "subbed";
+    }
+
     const filterScriptPath = path.join(workDir, "filter.txt");
     await writeFile(filterScriptPath, filterLines.join(";\n"));
+
+    const inputArgs: string[] = [];
+    for (const clipPath of clipPaths) inputArgs.push("-i", clipPath);
+    for (const audioPath of audioPaths) inputArgs.push("-i", audioPath);
 
     const finalPath = path.join(workDir, "final.mp4");
     await runFfmpeg([
       "-y",
       ...inputArgs,
       "-filter_complex_script", filterScriptPath,
-      "-map", `[${combinedV}]`,
+      "-map", `[${finalVideoLabel}]`,
       "-map", `[${combinedA}]`,
       "-r", String(FPS),
       "-c:v", "libx264",

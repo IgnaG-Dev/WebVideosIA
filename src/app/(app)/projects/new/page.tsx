@@ -93,6 +93,11 @@ export default function NewProjectPage() {
           </span>
         </div>
 
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="subtitles_enabled" />
+          Agregar subtítulos (sincronizados con el audio de cada segmento)
+        </label>
+
         {mode === "manual" ? (
           <label className="flex flex-col gap-1 text-sm">
             Guion completo
