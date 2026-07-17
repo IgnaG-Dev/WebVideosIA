@@ -30,6 +30,7 @@ const PROGRESS_STEP_LABEL: Record<string, string> = {
   segmenting: "Dividiendo el guion en segmentos...",
   clips: "Renderizando la animación de cada segmento...",
   encoding: "Uniendo los segmentos y codificando el video...",
+  compressing: "Comprimiendo el video para que ocupe menos espacio...",
   uploading: "Subiendo el video final...",
 };
 

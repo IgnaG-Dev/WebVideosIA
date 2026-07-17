@@ -1,6 +1,6 @@
 import "server-only";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { cpus, tmpdir } from "node:os";
 import path from "node:path";
 import type { SegmentAnimation, SegmentTransition } from "./types";
@@ -33,7 +33,16 @@ export type SegmentAsset = {
 
 export type AssembleProgress =
   | { step: "clips"; current: number; total: number }
-  | { step: "encoding"; current: number; total: number };
+  | { step: "encoding"; current: number; total: number }
+  | { step: "compressing"; current: number; total: number };
+
+// Si el video final pesa más que esto, se recomprime a un bitrate menor
+// (mismo criterio que el umbral de Storage) para que ocupe mucho menos
+// espacio, en vez de subir un archivo pesado sin necesidad.
+const COMPRESS_THRESHOLD_BYTES = 50 * 1024 * 1024;
+const COMPRESS_TARGET_BYTES = 35 * 1024 * 1024;
+const COMPRESS_AUDIO_BITRATE_KBPS = 128;
+const COMPRESS_MIN_VIDEO_BITRATE_KBPS = 300;
 
 export type AssembleOptions = {
   subtitlesEnabled?: boolean;
@@ -473,7 +482,43 @@ export async function assembleSegmentsToVideo(
     ]);
     options.onProgress?.({ step: "encoding", current: 1, total: 1 });
 
-    return new Uint8Array(await readFile(finalPath));
+    const { size } = await stat(finalPath);
+    if (size <= COMPRESS_THRESHOLD_BYTES) {
+      return new Uint8Array(await readFile(finalPath));
+    }
+
+    // Pesa más de lo razonable para subir/almacenar — se recomprime a un
+    // bitrate calculado para acercarse al tamaño objetivo, en vez de subir
+    // el archivo pesado tal cual. Es una segunda pasada liviana (solo
+    // transcodifica, no vuelve a correr zoompan/concat/subtítulos).
+    options.onProgress?.({ step: "compressing", current: 0, total: 1 });
+    const totalBitrateKbps = Math.floor(
+      (COMPRESS_TARGET_BYTES * 8) / combinedDuration / 1000,
+    );
+    const videoBitrateKbps = Math.max(
+      COMPRESS_MIN_VIDEO_BITRATE_KBPS,
+      totalBitrateKbps - COMPRESS_AUDIO_BITRATE_KBPS,
+    );
+
+    const compressedPath = path.join(workDir, "final-compressed.mp4");
+    await runFfmpeg([
+      "-y",
+      "-i", finalPath,
+      "-c:v", "libx264",
+      "-b:v", `${videoBitrateKbps}k`,
+      "-maxrate", `${Math.round(videoBitrateKbps * 1.5)}k`,
+      "-bufsize", `${videoBitrateKbps * 2}k`,
+      "-preset", "medium",
+      "-threads", String(THREADS),
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-b:a", `${COMPRESS_AUDIO_BITRATE_KBPS}k`,
+      "-movflags", "+faststart",
+      compressedPath,
+    ]);
+    options.onProgress?.({ step: "compressing", current: 1, total: 1 });
+
+    return new Uint8Array(await readFile(compressedPath));
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
