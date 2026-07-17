@@ -1,0 +1,133 @@
+import "server-only";
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+const WIDTH = 1280;
+const HEIGHT = 720;
+const FPS = 25;
+
+export type SegmentAsset = {
+  mediaType: "image" | "video";
+  mediaBytes: Uint8Array;
+  mediaExtension: string;
+  audioBytes: Uint8Array;
+};
+
+function runFfmpeg(args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    proc.on("error", (err) => {
+      reject(new Error(`No se pudo ejecutar ffmpeg: ${err.message}`));
+    });
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`ffmpeg terminó con código ${code}: ${stderr.slice(-2000)}`));
+      }
+    });
+  });
+}
+
+async function buildSegmentClip(
+  workDir: string,
+  segment: SegmentAsset,
+  index: number,
+): Promise<string> {
+  const mediaPath = path.join(workDir, `segment-${index}-media.${segment.mediaExtension}`);
+  const audioPath = path.join(workDir, `segment-${index}-audio.mp3`);
+  const outputPath = path.join(workDir, `segment-${index}.mp4`);
+
+  await writeFile(mediaPath, segment.mediaBytes);
+  await writeFile(audioPath, segment.audioBytes);
+
+  const scaleFilter = `scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+
+  const args =
+    segment.mediaType === "video"
+      ? [
+          "-y",
+          "-stream_loop", "-1",
+          "-i", mediaPath,
+          "-i", audioPath,
+          "-map", "0:v:0",
+          "-map", "1:a:0",
+          "-vf", scaleFilter,
+          "-r", String(FPS),
+          "-c:v", "libx264",
+          "-pix_fmt", "yuv420p",
+          "-c:a", "aac",
+          "-b:a", "192k",
+          "-ar", "44100",
+          "-shortest",
+          outputPath,
+        ]
+      : [
+          "-y",
+          "-loop", "1",
+          "-i", mediaPath,
+          "-i", audioPath,
+          "-vf", scaleFilter,
+          "-r", String(FPS),
+          "-c:v", "libx264",
+          "-tune", "stillimage",
+          "-pix_fmt", "yuv420p",
+          "-c:a", "aac",
+          "-b:a", "192k",
+          "-ar", "44100",
+          "-shortest",
+          outputPath,
+        ];
+
+  await runFfmpeg(args);
+  return outputPath;
+}
+
+/**
+ * Arma un clip por segmento (media + audio, con la duración del audio) y
+ * concatena todos los clips en un único video final. Devuelve los bytes del
+ * mp4 resultante; quien llama es responsable de subirlos a Storage.
+ */
+export async function assembleSegmentsToVideo(
+  segments: SegmentAsset[],
+): Promise<Uint8Array> {
+  if (segments.length === 0) {
+    throw new Error("No hay segmentos para armar el video.");
+  }
+
+  const workDir = await mkdtemp(path.join(tmpdir(), "video-ia-"));
+  try {
+    const clipPaths: string[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      clipPaths.push(await buildSegmentClip(workDir, segments[i], i));
+    }
+
+    const listPath = path.join(workDir, "concat.txt");
+    const listContent = clipPaths
+      .map((clipPath) => `file '${clipPath.replace(/'/g, "'\\''")}'`)
+      .join("\n");
+    await writeFile(listPath, listContent);
+
+    const finalPath = path.join(workDir, "final.mp4");
+    // Los clips ya comparten codec/resolución/fps, así que el concat
+    // demuxer puede copiar streams sin re-codificar.
+    await runFfmpeg([
+      "-y",
+      "-f", "concat",
+      "-safe", "0",
+      "-i", listPath,
+      "-c", "copy",
+      finalPath,
+    ]);
+
+    return new Uint8Array(await readFile(finalPath));
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
+  }
+}

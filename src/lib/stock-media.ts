@@ -1,0 +1,148 @@
+import "server-only";
+
+export type MediaType = "image" | "video";
+export type MediaProvider = "pexels" | "pixabay" | "gemini";
+
+export type StockMediaResult = {
+  url: string;
+  type: MediaType;
+  provider: MediaProvider;
+};
+
+interface StockMediaSource {
+  provider: MediaProvider;
+  searchImage(keywords: string): Promise<StockMediaResult | null>;
+  searchVideo(keywords: string): Promise<StockMediaResult | null>;
+}
+
+const pexelsSource: StockMediaSource = {
+  provider: "pexels",
+
+  async searchImage(keywords) {
+    const apiKey = process.env.PEXELS_API_KEY;
+    if (!apiKey) return null;
+
+    const res = await fetch(
+      `https://api.pexels.com/v1/search?query=${encodeURIComponent(keywords)}&per_page=1&orientation=landscape`,
+      { headers: { Authorization: apiKey } },
+    );
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as {
+      photos?: Array<{ src: { large: string } }>;
+    };
+    const photo = data.photos?.[0];
+    if (!photo) return null;
+
+    return { url: photo.src.large, type: "image", provider: "pexels" };
+  },
+
+  async searchVideo(keywords) {
+    const apiKey = process.env.PEXELS_API_KEY;
+    if (!apiKey) return null;
+
+    const res = await fetch(
+      `https://api.pexels.com/videos/search?query=${encodeURIComponent(keywords)}&per_page=1&orientation=landscape`,
+      { headers: { Authorization: apiKey } },
+    );
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as {
+      videos?: Array<{
+        video_files: Array<{ link: string; quality: string; width: number }>;
+      }>;
+    };
+    const video = data.videos?.[0];
+    if (!video) return null;
+
+    const file =
+      video.video_files.find((f) => f.quality === "sd" && f.width <= 960) ??
+      video.video_files[0];
+    if (!file) return null;
+
+    return { url: file.link, type: "video", provider: "pexels" };
+  },
+};
+
+const pixabaySource: StockMediaSource = {
+  provider: "pixabay",
+
+  async searchImage(keywords) {
+    const apiKey = process.env.PIXABAY_API_KEY;
+    if (!apiKey) return null;
+
+    const res = await fetch(
+      `https://pixabay.com/api/?key=${apiKey}&q=${encodeURIComponent(keywords)}&image_type=photo&per_page=3&safesearch=true`,
+    );
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as {
+      hits?: Array<{ largeImageURL: string }>;
+    };
+    const hit = data.hits?.[0];
+    if (!hit) return null;
+
+    return { url: hit.largeImageURL, type: "image", provider: "pixabay" };
+  },
+
+  async searchVideo(keywords) {
+    const apiKey = process.env.PIXABAY_API_KEY;
+    if (!apiKey) return null;
+
+    const res = await fetch(
+      `https://pixabay.com/api/videos/?key=${apiKey}&q=${encodeURIComponent(keywords)}&per_page=3&safesearch=true`,
+    );
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as {
+      hits?: Array<{
+        videos: { medium?: { url: string }; small?: { url: string } };
+      }>;
+    };
+    const hit = data.hits?.[0];
+    const url = hit?.videos.medium?.url ?? hit?.videos.small?.url;
+    if (!url) return null;
+
+    return { url, type: "video", provider: "pixabay" };
+  },
+};
+
+// Reservado para una fase futura: generación de imágenes/video con la API
+// de Gemini (variable GEMINI_API_KEY, todavía no usada). Para sumarla más
+// adelante: implementar acá un StockMediaSource más y agregarlo a SOURCES
+// — el resto del flujo (worker, ffmpeg) no necesita cambios porque solo
+// conoce la forma StockMediaResult { url, type, provider }.
+// const geminiSource: StockMediaSource = { provider: "gemini", ... };
+
+const SOURCES: StockMediaSource[] = [pexelsSource, pixabaySource];
+
+/**
+ * Busca contenido visual real (imagen o, si no hay, video) que coincida con
+ * las palabras clave de un segmento, probando los proveedores en orden.
+ */
+export async function searchMedia(
+  keywords: string,
+): Promise<StockMediaResult | null> {
+  for (const source of SOURCES) {
+    const image = await source.searchImage(keywords);
+    if (image) return image;
+  }
+  for (const source of SOURCES) {
+    const video = await source.searchVideo(keywords);
+    if (video) return video;
+  }
+  return null;
+}
+
+export async function downloadMedia(
+  url: string,
+): Promise<{ bytes: Uint8Array; contentType: string }> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`No se pudo descargar el media (${res.status}): ${url}`);
+  }
+  const contentType =
+    res.headers.get("content-type") ?? "application/octet-stream";
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  return { bytes, contentType };
+}
