@@ -8,13 +8,13 @@ RUN npm ci
 FROM node:20-slim AS builder
 WORKDIR /app
 # Next.js inyecta las variables NEXT_PUBLIC_* en el bundle del cliente en
-# tiempo de build, no de runtime — por eso hace falta pasarlas como build args
-# acá (son públicas, no son secretas). El resto de las variables (keys
-# privadas) solo se necesitan en runtime y se configuran aparte.
-ARG NEXT_PUBLIC_SUPABASE_URL
-ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
-ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
-ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+# tiempo de build, no de runtime. El panel de deploy usado no expone "build
+# args" para builds con Dockerfile, así que van fijas acá — son públicas por
+# diseño (viajan al navegador de todos modos), no son secretas. El resto de
+# las variables (keys privadas) solo se necesitan en runtime y se configuran
+# como variables de entorno normales en el panel.
+ENV NEXT_PUBLIC_SUPABASE_URL=https://lpuclnvvdtobremsigih.supabase.co
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwdWNsbnZ2ZHRvYnJlbXNpZ2loIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyNTM2NTIsImV4cCI6MjA5OTgyOTY1Mn0.4JkRnCdabsrg4c6n1lmkJ4aumYlF1fxjSlFNKQmp__E
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
