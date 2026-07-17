@@ -11,19 +11,19 @@ export type StockMediaResult = {
 
 interface StockMediaSource {
   provider: MediaProvider;
-  searchImage(keywords: string): Promise<StockMediaResult | null>;
-  searchVideo(keywords: string): Promise<StockMediaResult | null>;
+  searchImage(keywords: string, page: number): Promise<StockMediaResult | null>;
+  searchVideo(keywords: string, page: number): Promise<StockMediaResult | null>;
 }
 
 const pexelsSource: StockMediaSource = {
   provider: "pexels",
 
-  async searchImage(keywords) {
+  async searchImage(keywords, page) {
     const apiKey = process.env.PEXELS_API_KEY;
     if (!apiKey) return null;
 
     const res = await fetch(
-      `https://api.pexels.com/v1/search?query=${encodeURIComponent(keywords)}&per_page=1&orientation=landscape`,
+      `https://api.pexels.com/v1/search?query=${encodeURIComponent(keywords)}&per_page=1&page=${page}&orientation=landscape`,
       { headers: { Authorization: apiKey } },
     );
     if (!res.ok) return null;
@@ -37,12 +37,12 @@ const pexelsSource: StockMediaSource = {
     return { url: photo.src.large, type: "image", provider: "pexels" };
   },
 
-  async searchVideo(keywords) {
+  async searchVideo(keywords, page) {
     const apiKey = process.env.PEXELS_API_KEY;
     if (!apiKey) return null;
 
     const res = await fetch(
-      `https://api.pexels.com/videos/search?query=${encodeURIComponent(keywords)}&per_page=1&orientation=landscape`,
+      `https://api.pexels.com/videos/search?query=${encodeURIComponent(keywords)}&per_page=1&page=${page}&orientation=landscape`,
       { headers: { Authorization: apiKey } },
     );
     if (!res.ok) return null;
@@ -67,12 +67,12 @@ const pexelsSource: StockMediaSource = {
 const pixabaySource: StockMediaSource = {
   provider: "pixabay",
 
-  async searchImage(keywords) {
+  async searchImage(keywords, page) {
     const apiKey = process.env.PIXABAY_API_KEY;
     if (!apiKey) return null;
 
     const res = await fetch(
-      `https://pixabay.com/api/?key=${apiKey}&q=${encodeURIComponent(keywords)}&image_type=photo&per_page=3&safesearch=true`,
+      `https://pixabay.com/api/?key=${apiKey}&q=${encodeURIComponent(keywords)}&image_type=photo&per_page=3&page=${page}&safesearch=true`,
     );
     if (!res.ok) return null;
 
@@ -85,12 +85,12 @@ const pixabaySource: StockMediaSource = {
     return { url: hit.largeImageURL, type: "image", provider: "pixabay" };
   },
 
-  async searchVideo(keywords) {
+  async searchVideo(keywords, page) {
     const apiKey = process.env.PIXABAY_API_KEY;
     if (!apiKey) return null;
 
     const res = await fetch(
-      `https://pixabay.com/api/videos/?key=${apiKey}&q=${encodeURIComponent(keywords)}&per_page=3&safesearch=true`,
+      `https://pixabay.com/api/videos/?key=${apiKey}&q=${encodeURIComponent(keywords)}&per_page=3&page=${page}&safesearch=true`,
     );
     if (!res.ok) return null;
 
@@ -119,19 +119,34 @@ const SOURCES: StockMediaSource[] = [pexelsSource, pixabaySource];
 /**
  * Busca contenido visual real (imagen o, si no hay, video) que coincida con
  * las palabras clave de un segmento, probando los proveedores en orden.
+ * `page` permite pedir un resultado distinto al de una búsqueda anterior
+ * con las mismas palabras clave (ver `searchDifferentMedia`).
  */
 export async function searchMedia(
   keywords: string,
+  page = 1,
 ): Promise<StockMediaResult | null> {
   for (const source of SOURCES) {
-    const image = await source.searchImage(keywords);
+    const image = await source.searchImage(keywords, page);
     if (image) return image;
   }
   for (const source of SOURCES) {
-    const video = await source.searchVideo(keywords);
+    const video = await source.searchVideo(keywords, page);
     if (video) return video;
   }
   return null;
+}
+
+/**
+ * Como searchMedia, pero pide una página al azar (dentro de un rango chico)
+ * para no traer siempre el mismo resultado top — pensado para "buscar otra
+ * imagen" sobre un segmento que ya tiene una.
+ */
+export async function searchDifferentMedia(
+  keywords: string,
+): Promise<StockMediaResult | null> {
+  const page = 1 + Math.floor(Math.random() * 5);
+  return searchMedia(keywords, page);
 }
 
 export async function downloadMedia(

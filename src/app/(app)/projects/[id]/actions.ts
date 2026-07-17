@@ -6,7 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  searchMedia,
+  searchDifferentMedia,
   downloadMedia,
   extractKeywords,
   extensionFromContentType,
@@ -161,9 +161,15 @@ export async function updateSegmentsContent(
 
     const update: Record<string, unknown> = {
       text: segment.text.trim(),
-      estimated_duration_seconds: segment.estimated_duration_seconds,
       status: "pending",
     };
+    // La duración real siempre la termina marcando el audio (ffmpeg usa
+    // -shortest). Antes de generar audio todavía es solo una estimación y
+    // se puede ajustar; una vez que hay audio real, no se toca acá — la
+    // actualiza el worker con la duración medida.
+    if (!current?.audio_url) {
+      update.estimated_duration_seconds = segment.estimated_duration_seconds;
+    }
     // El audio narra el texto viejo — si el texto cambió, hay que
     // regenerarlo (el worker lo hace de nuevo porque audio_url queda null).
     if (textChanged) {
@@ -207,7 +213,7 @@ export async function replaceSegmentImage(
   if (!segment) return { error: "Segmento no encontrado." };
 
   const keywords = extractKeywords(segment.text);
-  const result = await searchMedia(keywords);
+  const result = await searchDifferentMedia(keywords);
   if (!result) {
     return { error: `No se encontró una imagen nueva para "${keywords}".` };
   }

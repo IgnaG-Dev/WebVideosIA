@@ -11,7 +11,11 @@ import {
   extensionFromContentType,
 } from "./src/lib/stock-media";
 import { synthesizeSpeech } from "./src/lib/tts";
-import { assembleSegmentsToVideo, type SegmentAsset } from "./src/lib/ffmpeg";
+import {
+  assembleSegmentsToVideo,
+  getAudioDurationSeconds,
+  type SegmentAsset,
+} from "./src/lib/ffmpeg";
 
 const POLL_INTERVAL_MS = 5000;
 const SEGMENT_CONCURRENCY = 3;
@@ -191,9 +195,17 @@ async function fetchAndUploadAudio(
     .from(ASSETS_BUCKET)
     .getPublicUrl(path);
 
+  // El video de este segmento siempre va a durar lo que dura el audio real
+  // (ffmpeg usa -shortest), así que guardamos la duración medida en vez de
+  // la estimación del guion — el número que se muestra queda exacto.
+  const durationSeconds = await getAudioDurationSeconds(bytes);
+
   await admin
     .from("segments")
-    .update({ audio_url: publicUrlData.publicUrl })
+    .update({
+      audio_url: publicUrlData.publicUrl,
+      estimated_duration_seconds: durationSeconds,
+    })
     .eq("id", segment.id);
 }
 
@@ -285,13 +297,12 @@ type AssemblySegmentRow = {
   media_type: "image" | "video" | null;
   image_url: string | null;
   audio_url: string | null;
-  estimated_duration_seconds: number;
 };
 
 async function processAssembly(admin: SupabaseClient, projectId: string) {
   const { data: segments, error } = await admin
     .from("segments")
-    .select("order_index, media_type, image_url, audio_url, estimated_duration_seconds")
+    .select("order_index, media_type, image_url, audio_url")
     .eq("project_id", projectId)
     .order("order_index", { ascending: true })
     .returns<AssemblySegmentRow[]>();
@@ -318,7 +329,6 @@ async function processAssembly(admin: SupabaseClient, projectId: string) {
         mediaBytes: media.bytes,
         mediaExtension: extensionFromContentType(media.contentType),
         audioBytes: audio.bytes,
-        durationSeconds: segment.estimated_duration_seconds,
       };
     },
   );

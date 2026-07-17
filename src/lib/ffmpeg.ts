@@ -19,10 +19,6 @@ export type SegmentAsset = {
   mediaBytes: Uint8Array;
   mediaExtension: string;
   audioBytes: Uint8Array;
-  // Duración máxima del clip en segundos. Si el audio dura menos, manda el
-  // audio (-shortest); si el usuario recortó la duración a un valor menor
-  // al del audio, este límite corta el clip ahí (-t).
-  durationSeconds: number;
 };
 
 function runFfmpeg(args: string[]): Promise<void> {
@@ -43,6 +39,54 @@ function runFfmpeg(args: string[]): Promise<void> {
       }
     });
   });
+}
+
+function runFfprobe(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    proc.on("error", (err) => {
+      reject(new Error(`No se pudo ejecutar ffprobe: ${err.message}`));
+    });
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve(stdout.trim());
+      } else {
+        reject(new Error(`ffprobe terminó con código ${code}: ${stderr.slice(-2000)}`));
+      }
+    });
+  });
+}
+
+/** Duración real del audio en segundos, midiéndolo con ffprobe. */
+export async function getAudioDurationSeconds(
+  audioBytes: Uint8Array,
+): Promise<number> {
+  const workDir = await mkdtemp(path.join(tmpdir(), "probe-"));
+  try {
+    const audioPath = path.join(workDir, "audio.mp3");
+    await writeFile(audioPath, audioBytes);
+    const stdout = await runFfprobe([
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      audioPath,
+    ]);
+    const seconds = parseFloat(stdout);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      throw new Error(`ffprobe devolvió una duración inválida: "${stdout}"`);
+    }
+    return seconds;
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
+  }
 }
 
 async function mapWithConcurrency<T, R>(
@@ -97,7 +141,6 @@ async function buildSegmentClip(
           "-b:a", "192k",
           "-ar", "44100",
           "-shortest",
-          "-t", String(segment.durationSeconds),
           outputPath,
         ]
       : [
@@ -116,7 +159,6 @@ async function buildSegmentClip(
           "-b:a", "192k",
           "-ar", "44100",
           "-shortest",
-          "-t", String(segment.durationSeconds),
           outputPath,
         ];
 
