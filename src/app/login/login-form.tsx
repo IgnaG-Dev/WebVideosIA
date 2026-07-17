@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useActionState } from "react";
 import { login, type AuthState } from "./actions";
@@ -10,7 +9,6 @@ const initialState: AuthState = { error: null };
 export function LoginForm() {
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? "/dashboard";
-  const registered = searchParams.get("registered");
   const [state, formAction, pending] = useActionState(login, initialState);
 
   return (
@@ -21,12 +19,6 @@ export function LoginForm() {
           Accedé a tus proyectos de video.
         </p>
       </div>
-
-      {registered && (
-        <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700">
-          Revisá tu email para confirmar la cuenta antes de iniciar sesión.
-        </p>
-      )}
 
       <form action={formAction} className="flex flex-col gap-4">
         <input type="hidden" name="redirectTo" value={redirectTo} />
@@ -59,13 +51,6 @@ export function LoginForm() {
           {pending ? "Ingresando..." : "Ingresar"}
         </button>
       </form>
-
-      <p className="text-sm text-foreground/60">
-        ¿No tenés cuenta?{" "}
-        <Link href="/register" className="underline">
-          Registrate
-        </Link>
-      </p>
     </div>
   );
 }
