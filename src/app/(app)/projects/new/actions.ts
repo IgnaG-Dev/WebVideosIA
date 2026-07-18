@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { segmentScript } from "@/lib/openai";
+import { segmentScriptWithAI } from "@/lib/script-generation";
 import type { MediaPreference, ScriptLanguage, ScriptMode } from "@/lib/types";
 
 export type CreateProjectState = { error: string | null };
@@ -57,7 +57,7 @@ export async function createProject(
 
     let segments;
     try {
-      segments = await segmentScript({ fullScript, targetDurationMinutes });
+      segments = await segmentScriptWithAI({ fullScript, targetDurationMinutes });
     } catch {
       return {
         error: "No se pudo procesar el guion. Probá de nuevo en unos segundos.",

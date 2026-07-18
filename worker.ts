@@ -3,7 +3,10 @@ config({ path: ".env.local" });
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "./src/lib/supabase/admin";
-import { generateScript, segmentScript } from "./src/lib/openai";
+import {
+  generateScriptWithAI,
+  segmentScriptWithAI,
+} from "./src/lib/script-generation";
 import { generateImageWithAI, buildImagePrompt } from "./src/lib/image-generation";
 import {
   searchMedia,
@@ -132,7 +135,7 @@ async function processGenerateScript(admin: SupabaseClient, projectId: string) {
 
   await setProgress(admin, projectId, "script", 0, 0);
 
-  const fullScript = await generateScript({
+  const fullScript = await generateScriptWithAI({
     topic: project.topic,
     tone: project.tone,
     audience: project.audience,
@@ -147,7 +150,7 @@ async function processGenerateScript(admin: SupabaseClient, projectId: string) {
 
   await setProgress(admin, projectId, "segmenting", 0, 0);
 
-  const segments = await segmentScript({
+  const segments = await segmentScriptWithAI({
     fullScript,
     targetDurationMinutes: project.target_duration_minutes,
   });
