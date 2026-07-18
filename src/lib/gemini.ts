@@ -6,7 +6,7 @@ import type { ScriptSegment, ScriptProgress } from "./openai";
 const IMAGE_MODEL = "gemini-2.5-flash-image";
 const TEXT_MODEL = "gemini-2.5-flash";
 const IMAGE_TIMEOUT_MS = 45000;
-const TEXT_TIMEOUT_MS = 60000;
+const TEXT_TIMEOUT_MS = 120000;
 
 /**
  * Genera una imagen con Gemini a partir de un prompt de texto. Se usa como
